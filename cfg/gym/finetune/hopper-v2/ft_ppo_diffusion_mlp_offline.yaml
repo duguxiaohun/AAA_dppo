@@ -12,7 +12,10 @@ normalization_path: ${hydra:runtime.cwd}/logs/gym/${env_name}/normalization.npz
 
 seed: 42
 device: cuda:0
-env_name: Carla-v0
+# 环境切换接口：默认 Town05 十字路口左转场景
+# 也可命令行覆盖：python script/offline_train.py carla_env_interface=CarlaTown05Cross-v0
+carla_env_interface: CarlaTown05Cross-v0
+env_name: ${carla_env_interface}
 obs_dim: 128
 action_dim: 2
 denoising_steps: 4

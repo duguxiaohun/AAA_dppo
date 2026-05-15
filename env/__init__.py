@@ -1,15 +1,18 @@
 import gym
-from env.carla_env import InterSection
 
-# 主注册
+# Town10 原始场景
 gym.register(
     id="Carla-v0",
     entry_point="env.carla_env:InterSection",
 )
 
+# Town05 十字路口左转场景
+gym.register(
+    id="CarlaTown05Cross-v0",
+    entry_point="env.carla_env_town05:InterSection",
+)
 
-
-# 兜底：有地方传 "Carla" 也能跑
+# 兜底别名
 try:
     gym.register(
         id="Carla",
@@ -17,5 +20,4 @@ try:
     )
 except gym.error.RegistrationError:
     pass
-
 

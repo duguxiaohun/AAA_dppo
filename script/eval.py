@@ -67,7 +67,7 @@ def start_carla(port, quality="Epic"):
 
 @hydra.main(
     version_base=None,
-    config_path="../cfg/gym/finetune/hopper-v2",
+    config_path="../cfg/gym/finetune/carla-town05",
     config_name="ft_ppo_diffusion_mlp_eval",
 )
 def main(cfg: OmegaConf):

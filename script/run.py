@@ -61,11 +61,12 @@ def start_carla(port):
     # 启动CARLA并指定端口
     subprocess.Popen(['/home/codon/CARLA/CARLA_0.9.12/CarlaUE4.sh',
                       '-port={}'.format(port),
-                      '-RenderOffScreen'])
+                    #   '-RenderOffScreen'
+                      ])
 
 @hydra.main(
     version_base=None,
-    config_path="../cfg/gym/finetune/hopper-v2",
+    config_path="../cfg/gym/finetune/carla-town05",
     config_name="ft_ppo_diffusion_mlp",
 )
 def main(cfg: OmegaConf):

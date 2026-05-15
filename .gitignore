@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 实验数据和Checkpoint（不需要版本控制）
+baseline/checkpoint/
+baseline/render/
+checkpoint/
+*.pt
+*.pth
+*.ckpt
+*.pkl
+
+# 数据集文件
+data/
+*.hdf5
+*.h5
+*.hdf
+dataset/
+offline_data/
+
+# 日志和输出
+logs/
+wandb/
+script/logs/
+script/dataset/
+script/wandb/
+script/offline_data/
+*.log
+
+# 临时文件
+.cache/
+.claude/
+
+# 生成的临时文件
+*.pdf
+*.png
+record.txt
+Uncertainty_*.pdf
+Uncertainty_*.png
+
+# CARLA临时文件
+carla_data/
+carla_logs/
+
+# 其他临时文件
+offline_carla_collector.bash.save

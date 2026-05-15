@@ -1,0 +1,133 @@
+_target_: agent.train_ppo_diffusion_agent.TrainPPODiffusionAgent
+name: ${env_name}_ppo_diffusion_mlp_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
+logdir: ${hydra:runtime.cwd}/logs/gym-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+normalization_path: ${hydra:runtime.cwd}/logs/gym/${env_name}/normalization.npz
+seed: 42
+device: cuda:0
+env_name: Carla-v0
+obs_dim: 128
+action_dim: 2
+denoising_steps: 20
+ft_denoising_steps: 20
+cond_steps: 1
+horizon_steps: 1
+act_steps: 1
+memory_size: 200000
+warm_up: 500
+tau: 0.05
+env:
+  n_envs: 1
+  reward_scale: 0.01
+  name: ${env_name}
+  max_episode_steps: 1000
+  reset_at_iteration: false
+  save_video: false
+  best_reward_threshold_for_success: 3
+  wrappers: {}
+wandb:
+  entity: 1150900229-
+  project: gym-${env_name}-finetune1
+  run: ${now:%H-%M-%S}_${name}
+train:
+  n_train_itr: 2500
+  n_critic_warmup_itr: 0
+  n_steps: 2000
+  gamma: 0.99
+  actor_lr: 0.0001
+  actor_weight_decay: 0
+  actor_lr_scheduler:
+    first_cycle_steps: 1000
+    warmup_steps: 10
+    min_lr: 0.0001
+  critic_lr: 0.001
+  critic_weight_decay: 0
+  critic_lr_scheduler:
+    first_cycle_steps: 1000
+    warmup_steps: 10
+    min_lr: 0.001
+  save_model_freq: 20
+  val_freq: 20
+  render:
+    freq: 1
+    num: 0
+  reward_scale_running: true
+  reward_scale_const: 1.0
+  gae_lambda: 0.95
+  batch_size: 64
+  update_epochs: 5
+  vf_coef: 0.5
+  target_kl: 1
+model:
+  _target_: model.diffusion.diffusion_ppo.PPODiffusion
+  gamma_denoising: 0.99
+  diffusion_iter: 5
+  action_lr: 0.03
+  update_times: 20
+  clip_ploss_coef: 0.01
+  clip_ploss_coef_base: 0.01
+  clip_ploss_coef_rate: 3
+  randn_clip_value: 3
+  min_sampling_denoising_std: 0.1
+  min_logprob_denoising_std: 0.1
+  gamma: 0.99
+  nstep: 1
+  params: {}
+  max_grad_norm: 1
+  actor:
+    _target_: model.diffusion.mlp_diffusion.DiffusionMLP
+    time_dim: 16
+    mlp_dims:
+    - 512
+    - 512
+    - 512
+    activation_type: ReLU
+    residual_style: true
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+    action_steps: ${act_steps}
+  critic:
+    _target_: model.common.critic.DistributionalDoubleQ
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    action_dim: ${action_dim}
+    action_steps: ${act_steps}
+    mlp_dims:
+    - 256
+    - 256
+    - 256
+    activation_type: Mish
+    residual_style: true
+    v_min: 0
+    v_max: 5
+    num_atoms: 51
+    device: ${device}
+  ft_denoising_steps: ${ft_denoising_steps}
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+  noise:
+    type: mixed
+    decay: null
+    exp_decay_rate: 0.99
+    lin_decay_iters: 10000
+    std_max: 0.6
+    std_min: 0.05
+    tgt_pol_std: 0.8
+    tgt_pol_noise_bound: 0.2
+update_times: 8
+no_tgt_actor: true
+exp:
+  type: prop
+  fix_ratio: 0.5
+  stop_ratio: 0.7
+  mode_embedding: false
+distl: false
+v_min: 0
+v_max: 5
+num_atoms: 51
+cluster_threshold: null
+use_downsampling: false
+use_embedding: false
+embedding_dim: 5

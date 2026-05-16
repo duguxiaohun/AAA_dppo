@@ -250,32 +250,33 @@ class InterSection(gym.Env):
         self.obs_velo_list = []
         self.obs_agent_list = []
 
-        # Each port: list of (x, y, yaw) candidate spawn points
-        # Surrounding vehicles: north and south of the new intersection near x=-60.
-        north_port = [
-            (-47.5, -40.0,  90.0),   # southbound from north
-            (-44.0, -50.0,  90.0),
+        # Each port: list of (x, y, yaw) candidate spawn points.
+        # Intersection centre ≈ (-63, 0).  Right-hand traffic assumed.
+        # N-S road: northbound (ego) x≈-47.01, southbound x≈-50.5 (3.5 m west).
+        # E-W road: westbound y≈-0.7/-4.2 (north lanes), eastbound y≈+3.5 (south lane).
+        north_port = [              # southbound, approaching from north
+            (-50.5, -20.0,  90.0),
+            (-50.5, -35.0,  90.0),
         ]
-        east_port = [
-            (-20.0,  -2.7, 180.0),   # westbound from east
-            (-15.0,   1.0, 180.0),
+        east_port = [               # westbound, approaching from east
+            (-25.0,  -0.7, 180.0),
+            (-30.0,  -4.2, 180.0),
         ]
-        south_port = [
-            (-47.5,  40.0, 270.0),   # northbound from south
-            (-44.0,  50.0, 270.0),
+        west_port = [               # eastbound, approaching from west
+            (-95.0,   3.5,   0.0),
+            (-100.0,  3.5,   0.0),
         ]
 
         spawn_points = []
-        for port in [north_port, east_port, south_port]:
+        for port in [north_port, east_port, west_port]:
             n = random.randint(1, 2)
             chosen = random.sample(port, n)
             for sx, sy, syaw in chosen:
-                trans = carla.Transform()
-                trans.location.x = sx
-                trans.location.y = sy
-                trans.location.z = 0.1
-                trans.rotation.yaw = syaw
-                spawn_points.append(trans)
+                # Use constructor to avoid carla.Location C++ temp-object bug
+                spawn_points.append(carla.Transform(
+                    carla.Location(x=sx, y=sy, z=0.1),
+                    carla.Rotation(yaw=syaw),
+                ))
 
         blueprints = self.world.get_blueprint_library().filter('vehicle.*')
         blueprints = [x for x in blueprints if (

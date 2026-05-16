@@ -625,36 +625,29 @@ class InterSection(gym.Env):
         preview_dis = round(np.clip(velocity_ego * 2, 1, 15))
         self.filter_planned_ego_waypoints(self.ego_vehicle, preview_dis)
 
-        # LocalPlanner._base_min_distance = 3.0 m.  At low speed the short
-        # preview_dis destination is immediately within min_distance → queue
-        # empties → brake=1.0 (stop).  Use at least 10 steps (≈5 m) so the
-        # queue always has enough waypoints and the heading PID has a stable
-        # lookahead (prevents left-right oscillation at short range too).
         nav_dis = max(preview_dis, 10)
-
-        # Mirror original carla_env: force straight in the approach section
-        # (y > 2.0 means ego is still north of the intersection entry).
-        if y_ego > 2.0:
-            lat_action = 0
 
         try:
             waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
-            if lat_action == -1:
-                left_lane = waypoint.get_left_lane()
-                if (waypoint.lane_change & carla.LaneChange.Left != 0) and left_lane is not None:
-                    nexts = left_lane.next(nav_dis)
-                else:
-                    nexts = waypoint.next(nav_dis)
-            elif lat_action == 1:
-                right_lane = waypoint.get_right_lane()
-                if (waypoint.lane_change & carla.LaneChange.Right != 0) and right_lane is not None:
-                    nexts = right_lane.next(nav_dis)
-                else:
-                    nexts = waypoint.next(nav_dis)
-            else:
+
+            if y_ego > 2.0:
+                # ── Approach section (straight road, y > 2) ──────────────────
+                # Mirror original carla_env: force lat_action=0, use short
+                # road-network preview for stable lane keeping.
                 nexts = waypoint.next(nav_dis)
-            if nexts:
-                self.agent.set_destination(nexts[0].transform.location)
+                if nexts:
+                    self.agent.set_destination(nexts[0].transform.location)
+            else:
+                # ── Intersection + exit section (y ≤ 2) ─────────────────────
+                # waypoint.next() inside the intersection returns approach-lane
+                # waypoints (y>0, north direction); BasicAgent plans south to
+                # reach them → steer=-0.8.  Instead send to the route END so
+                # BasicAgent routes west through the turn correctly.
+                if lat_action == 1:
+                    dest = self.wp2[-1]   # outer lane
+                else:
+                    dest = self.wp[-1]    # inner lane (default)
+                self.agent.set_destination(self._make_target(dest))
         except Exception:
             pass
 

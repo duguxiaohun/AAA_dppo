@@ -24,6 +24,7 @@ sys.path.insert(0, CARLA_PYAPI)
 sys.path.insert(0, os.path.join(CARLA_PYAPI, "agents"))
 
 from agents.navigation.basic_agent import BasicAgent
+from agents.navigation.global_route_planner import GlobalRoutePlanner
 from carla import VehicleLightState as vls
 import gym
 from gym import spaces
@@ -31,19 +32,30 @@ from gym import spaces
 screen_width, screen_height = 640, 360
 WIDTH, HEIGHT, PACK = 80, 45, 4
 
+# ── Scenario key coordinates — only edit here to move the scenario ────────────
+_SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  30.0, 0.5
+_END1_X,  _END1_Y             = -78.0,  -0.7
+_END2_X,  _END2_Y             = -78.0,  -4.2
+# Derived: camera and off-route bounds auto-adjust with the coordinates above
+_CAM_X = (_SPAWN_X + (_END1_X + _END2_X) / 2) / 2
+_CAM_Y = (_SPAWN_Y + (_END1_Y + _END2_Y) / 2) / 2
+_CAM_Z = 120.0
+_BOUND_X_MIN = min(_SPAWN_X, _END1_X, _END2_X) - 15
+_BOUND_X_MAX = max(_SPAWN_X, _END1_X, _END2_X) + 15
+_BOUND_Y_MIN = min(_SPAWN_Y, _END1_Y, _END2_Y) - 10
+_BOUND_Y_MAX = max(_SPAWN_Y, _END1_Y, _END2_Y) + 10
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 class InterSection(gym.Env):
     """
-    Town05 — 4-way intersection near x=-128, y=0.
-    Ego vehicle spawns south of the intersection heading north, then makes a
-    LEFT turn and continues westbound.  Three other ports each randomly spawn
-    1-2 surrounding vehicles with traffic-manager–assigned destinations.
-
-    Ego spawn : x=-126.25, y=40, yaw=270 (north)
-    Intersection centre : x≈-128, y≈0
-    Westbound exit lanes:
-        wp  (inner, y≈1.75)
-        wp2 (outer, y≈5.25)
+    Town05 left-turn scenario.
+    Ego spawns at x=-75, y=-2.7 and performs a left turn.
+    Two CARLA-native routes (GlobalRoutePlanner) are used:
+        wp  : spawn → (-78, 0.7)   route 1
+        wp2 : spawn → (-78, 4.2)   route 2
+    Both routes are visualised with start/end markers.
+    Camera is fixed overhead at z=120 for static observation.
     """
 
     def __init__(self, enabled_obs_number=8, vehicle_type='single', use_checker=False,
@@ -92,7 +104,7 @@ class InterSection(gym.Env):
         self.client = carla.Client('localhost', port)
         self.client.set_timeout(10.0)
 
-        self.world = self.client.load_world('Town05')
+        self.world = self.client.load_world('Town05_Opt')
         self.world.unload_map_layer(carla.MapLayer.Buildings)
         self.map = self.world.get_map()
 
@@ -159,16 +171,44 @@ class InterSection(gym.Env):
                 actor_.set_state(carla.TrafficLightState.Green)
                 actor_.set_green_time(2000.0)
 
+        # ---- Plan routes with GlobalRoutePlanner BEFORE spawning ego ----
+        # CARLA 0.9.12: GlobalRoutePlanner(wmap, sampling_resolution) — no DAO.
+        _grp = GlobalRoutePlanner(self.map, 0.5)
+
+        _start = carla.Location(x=_SPAWN_X, y=_SPAWN_Y, z=0.0)
+        _end1  = carla.Location(x=_END1_X,  y=_END1_Y,  z=0.0)
+        _end2  = carla.Location(x=_END2_X,  y=_END2_Y,  z=0.0)
+
+        _route1 = _grp.trace_route(_start, _end1)
+        _route2 = _grp.trace_route(_start, _end2)
+
+        if len(_route1) == 0 or len(_route2) == 0:
+            raise RuntimeError("GlobalRoutePlanner returned empty route — check locations are on valid road.")
+
+        self.wp  = np.array([[w.transform.location.x, w.transform.location.y]
+                              for w, _ in _route1], dtype=np.float64)
+        self.wp2 = np.array([[w.transform.location.x, w.transform.location.y]
+                              for w, _ in _route2], dtype=np.float64)
+
+        # Derive initial yaw from the first two waypoints of route 1
+        if len(self.wp) >= 2:
+            dx = self.wp[1][0] - self.wp[0][0]
+            dy = self.wp[1][1] - self.wp[0][1]
+            _init_yaw = math.degrees(math.atan2(dy, dx))
+        else:
+            _init_yaw = 0.0
+
+        print(f"[ROUTE] wp={len(self.wp)} pts, wp2={len(self.wp2)} pts, init_yaw={_init_yaw:.1f}°")
+
         # ---- Ego vehicle ----
         bp_ego = self.world.get_blueprint_library().filter('vehicle.mercedes.coupe_2020')[0]
         bp_ego.set_attribute('color', '0, 0, 0')
         bp_ego.set_attribute('role_name', 'hero')
 
-        spawn_point_ego = carla.Transform()
-        spawn_point_ego.location.x = -126.25
-        spawn_point_ego.location.y = 40.0
-        spawn_point_ego.location.z = 0.1
-        spawn_point_ego.rotation.yaw = 270   # heading north (−y direction)
+        spawn_point_ego = carla.Transform(
+            carla.Location(x=_SPAWN_X, y=_SPAWN_Y, z=_SPAWN_Z),
+            carla.Rotation(yaw=_init_yaw),
+        )
 
         if self.ego_vehicle is not None:
             self.destroy()
@@ -184,6 +224,11 @@ class InterSection(gym.Env):
 
         self.agent = BasicAgent(self.ego_vehicle, target_speed=self.target_speed,
                                 opt_dict={'ignore_vehicles': True})
+
+        # CRITICAL: disable TM autopilot so BasicAgent has sole control.
+        # set_autopilot(True) above puts the ego under TM which overrides
+        # apply_control every tick — causing the extreme left-turn at the intersection.
+        self.ego_vehicle.set_autopilot(False)
 
         self.speed_limit_flag = 0
         l = self.ego_vehicle.bounding_box.extent.x * 0.9
@@ -206,21 +251,22 @@ class InterSection(gym.Env):
         self.obs_agent_list = []
 
         # Each port: list of (x, y, yaw) candidate spawn points
+        # Surrounding vehicles: north and south of the new intersection near x=-60.
         north_port = [
-            (-129.75, -30.0, 90.0),   # right southbound lane
-            (-133.25, -45.0, 90.0),   # left southbound lane
+            (-47.5, -40.0,  90.0),   # southbound from north
+            (-44.0, -50.0,  90.0),
         ]
         east_port = [
-            (10.0,  1.75, 180.0),     # inner westbound lane
-            (25.0,  5.25, 180.0),     # outer westbound lane
+            (-20.0,  -2.7, 180.0),   # westbound from east
+            (-15.0,   1.0, 180.0),
         ]
-        west_port = [
-            (-190.0, -1.75, 0.0),     # inner eastbound lane
-            (-205.0, -5.25, 0.0),     # outer eastbound lane
+        south_port = [
+            (-47.5,  40.0, 270.0),   # northbound from south
+            (-44.0,  50.0, 270.0),
         ]
 
         spawn_points = []
-        for port in [north_port, east_port, west_port]:
+        for port in [north_port, east_port, south_port]:
             n = random.randint(1, 2)
             chosen = random.sample(port, n)
             for sx, sy, syaw in chosen:
@@ -288,11 +334,18 @@ class InterSection(gym.Env):
         self.count_speed = 0
         self.reset_traj_dataset()
 
-        script_dir = os.path.dirname(__file__)
-        self.wp  = np.load(script_dir + '/map/town05_wp_left.npy')
-        self.wp2 = np.load(script_dir + '/map/town05_wp_left2.npy')
+        # wp/wp2 are already built above from GlobalRoutePlanner.
+        # Forward-only tracking indices — never decrease.
+        self.wp_idx  = 0
+        self.wp2_idx = 0
 
         self.visualize_waypoints()
+
+        # Static overhead camera — set once, never updated in step().
+        self.spect_cam_static()
+
+        # Give BasicAgent the far end of route 1 as initial destination.
+        self.agent.set_destination(self._make_target(self.wp[-1]))
 
         state = self.get_observation_scene()
         self.agent.ignore_vehicles(active=True)
@@ -366,23 +419,31 @@ class InterSection(gym.Env):
 
     def filter_planned_ego_waypoints(self, vehicle, preview_dis):
         location = vehicle.get_location()
-        ego_location = np.array([[location.x, location.y]])
+        ego_xy = np.array([location.x, location.y])
 
-        dist_1 = np.linalg.norm(self.wp  - ego_location, axis=-1)
-        dist_2 = np.linalg.norm(self.wp2 - ego_location, axis=-1)
-        min_d1, arg_md1 = np.min(dist_1), np.argmin(dist_1)
-        min_d2, arg_md2 = np.min(dist_2), np.argmin(dist_2)
+        # Forward-only: search only the un-traversed tail of each route.
+        seg1 = self.wp [self.wp_idx :]
+        seg2 = self.wp2[self.wp2_idx:]
 
-        if min_d1 < min_d2:
-            r  = self.wp[arg_md1 + preview_dis]
-            rr = self.wp2[arg_md2 + preview_dis + 2]
-            lr = None
-        else:
-            r  = self.wp2[arg_md2 + preview_dis]
-            lr = self.wp[arg_md1 + preview_dis + 2]
-            rr = None
+        if len(seg1) > 0:
+            local1 = int(np.argmin(np.linalg.norm(seg1 - ego_xy, axis=-1)))
+            self.wp_idx = self.wp_idx + local1          # monotonically advance
 
-        return lr, r, rr
+        if len(seg2) > 0:
+            local2 = int(np.argmin(np.linalg.norm(seg2 - ego_xy, axis=-1)))
+            self.wp2_idx = self.wp2_idx + local2        # monotonically advance
+
+        # Lookahead targets on each route
+        wp_pt  = self.wp [min(self.wp_idx  + preview_dis, len(self.wp)  - 1)]
+        wp2_pt = self.wp2[min(self.wp2_idx + preview_dis, len(self.wp2) - 1)]
+
+        # r = lookahead on the currently closer route (default action=0 target)
+        d1 = np.linalg.norm(self.wp [self.wp_idx]  - ego_xy)
+        d2 = np.linalg.norm(self.wp2[self.wp2_idx] - ego_xy)
+        r  = wp_pt if d1 <= d2 else wp2_pt
+
+        # lr = route-1 (wp) target, rr = route-2 (wp2) target
+        return wp_pt, r, wp2_pt
 
     def filter_ego_waypoints(self, vehicle, preview_dis):
         location = vehicle.get_location()
@@ -421,13 +482,13 @@ class InterSection(gym.Env):
 
         results = self.depth_first_search(waypoint)
         if judge:
-            self.judge_off_route(location.x, location.y, results)
+            self.judge_off_route(location.x, location.y)
         if (waypoint.lane_change & carla.LaneChange.Left != 0) and (waypoint.get_left_lane() is not None):
             results.extend(self.depth_first_search(waypoint.get_left_lane()))
         if (waypoint.lane_change & carla.LaneChange.Right != 0) and (waypoint.get_right_lane() is not None):
             results.extend(self.depth_first_search(waypoint.get_right_lane()))
 
-        goal = [-175.0, 3.5]
+        goal = [_END2_X, _END2_Y]
         return self.filter_and_pad(results, goal)
 
     # ------------------------------------------------------------------
@@ -487,32 +548,12 @@ class InterSection(gym.Env):
                 self_trajs[-i, :] = np.array(queryed_trajs[queryed_time])
         return self_trajs
 
-    def spect_cam(self, vehicle):
-        """
-        Chase camera: placed behind and above the vehicle, yaw tracks vehicle heading.
-        Works correctly throughout the left-turn manoeuvre (north → west transition).
-
-        Geometry
-        --------
-        back   = 20 m  (behind vehicle along its heading)
-        height = 35 m  (above vehicle)
-        pitch  = -atan2(height, back) ≈ -60°  (angled down, not straight down)
-        """
+    def spect_cam_static(self):
+        """Fixed overhead camera centred on the turn scene.  Called once in reset()."""
         self.spectator = self.world.get_spectator()
-        veh_t   = vehicle.get_transform()
-        veh_loc = veh_t.location
-        yaw_rad = math.radians(veh_t.rotation.yaw)
-
-        back   = 20.0
-        height = 35.0
-
-        cam_loc = carla.Location(
-            x = veh_loc.x - math.cos(yaw_rad) * back,
-            y = veh_loc.y - math.sin(yaw_rad) * back,
-            z = veh_loc.z + height,
-        )
-        cam_pitch = -math.degrees(math.atan2(height, back))   # ≈ -60°
-        cam_rot   = carla.Rotation(pitch=cam_pitch, yaw=veh_t.rotation.yaw, roll=0.0)
+        # Centre between spawn (-47,-30) and endpoints (-78,~2.5)
+        cam_loc = carla.Location(x=_CAM_X, y=_CAM_Y, z=_CAM_Z)
+        cam_rot = carla.Rotation(pitch=-89.0, yaw=0.0, roll=0.0)
         self.spectator.set_transform(carla.Transform(cam_loc, cam_rot))
 
     def get_observation_scene(self):
@@ -586,48 +627,26 @@ class InterSection(gym.Env):
 
         self.world.tick()
 
-        waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
         target_speed, lat_action = self.action_adapter(action[0])
         self.target_speed = target_speed
         self.agent.set_target_speed(self.target_speed)
 
-        preview_dis = round(np.clip(velocity_ego * 2, 1, 15))
+        # Minimum 10 waypoints (5 m) so BasicAgent always has a stable lookahead target.
+        # With min=1 the destination was only 0.5 m ahead at low speed, causing
+        # the agent to reach-and-brake each tick instead of driving smoothly.
+        preview_dis = round(np.clip(velocity_ego * 2, 10, 30))
         wp_list = self.filter_planned_ego_waypoints(self.ego_vehicle, preview_dis)
         lr, r, rr = wp_list
 
-        # Freeze lateral action while ego is still in the approach / turn phase
-        if x_ego > -135:
-            lat_action = 0
-
         try:
-            preview_dis = round(np.clip(velocity_ego * 2, 1, 15))
+            # lr = route-1 (wp), r = closer route, rr = route-2 (wp2)
             if lat_action == -1:
-                if (waypoint.lane_change & carla.LaneChange.Left != 0) and (lr is not None):
-                    target_location = waypoint.get_left_lane().next(preview_dis)[0].transform.location
-                    target_location.x = lr[0]
-                    target_location.y = lr[1]
-                    self.agent.set_destination(target_location)
-                else:
-                    target_location = waypoint.next(preview_dis)[0].transform.location
-                    target_location.x = r[0]
-                    target_location.y = r[1]
-                    self.agent.set_destination(target_location)
+                target = lr if lr is not None else r
             elif lat_action == 1:
-                if (waypoint.lane_change & carla.LaneChange.Right != 0) and (rr is not None):
-                    target_location = waypoint.get_right_lane().next(preview_dis)[0].transform.location
-                    target_location.x = rr[0]
-                    target_location.y = rr[1]
-                    self.agent.set_destination(target_location)
-                else:
-                    target_location = waypoint.next(preview_dis)[0].transform.location
-                    target_location.x = r[0]
-                    target_location.y = r[1]
-                    self.agent.set_destination(target_location)
+                target = rr if rr is not None else r
             else:
-                target_location = waypoint.next(preview_dis)[0].transform.location
-                target_location.x = r[0]
-                target_location.y = r[1]
-                self.agent.set_destination(target_location)
+                target = r
+            self.agent.set_destination(self._make_target(target))
         except Exception:
             pass
 
@@ -643,15 +662,24 @@ class InterSection(gym.Env):
         y_ego = self.ego_vehicle.get_location().y
         x_ego = self.ego_vehicle.get_location().x
 
+        if self.count < 15:
+            print(f"[DBG] step={self.count:3d} x={x_ego:.2f} y={y_ego:.2f} "
+                  f"r=({float(r[0]):.2f},{float(r[1]):.2f}) "
+                  f"steer={self.control.steer:.3f} thr={self.control.throttle:.3f}")
+
         self.ego_vehicle.apply_control(self.control)
 
         next_state = self.get_observation_scene()
-        self.spect_cam(self.ego_vehicle)
+        # camera is static — no per-step update needed
 
         self.collision = self.get_collision_history()[1]
 
-        # Ego finishes when it has travelled far enough west in a valid lane
-        self.finish = (x_ego < -175) and (0.0 < y_ego < 7.0)
+        # Task complete: ego within 15 m of either endpoint
+        pos = np.array([x_ego, y_ego])
+        self.finish = (
+            np.linalg.norm(pos - np.array([_END1_X, _END1_Y])) < 15.0 or
+            np.linalg.norm(pos - np.array([_END2_X, _END2_Y])) < 15.0
+        )
         self.max_time = self.count > 300
 
         if self.collision:
@@ -695,22 +723,17 @@ class InterSection(gym.Env):
         return self.vehicle_state_dict
 
     # ------------------------------------------------------------------
-    def judge_off_route(self, x, y, waypoint):
-        min_list = []
-        for wp in waypoint:
-            dist = np.array(wp) - np.array([x, y])[np.newaxis, ...]
-            dist = np.linalg.norm(dist, axis=-1)
-            min_list.append(np.min(dist))
+    def judge_off_route(self, x, y):
+        # Use pre-planned routes as ground truth (ignore depth_first_search result)
+        ego_xy = np.array([[x, y]])
+        d1 = np.min(np.linalg.norm(self.wp  - ego_xy, axis=-1))
+        d2 = np.min(np.linalg.norm(self.wp2 - ego_xy, axis=-1))
+        self.off_route = (min(d1, d2) > 4.0)
 
-        self.off_route = False if np.min(min_list) < 2.5 else True
-
-        # Hard bounds for Town05 left-turn scenario
-        if x > -110 or y > 45 or y < -12:
+        # Hard bounding box: start (-47,-30) → ends (-78, ~4)
+        if x < _BOUND_X_MIN or x > _BOUND_X_MAX:
             self.off_route = True
-        if x < -215:
-            self.off_route = True
-        # After the left turn (heading west), ego must stay in westbound lanes
-        if x < -135 and (y < -2.0 or y > 9.0):
+        if y < _BOUND_Y_MIN or y > _BOUND_Y_MAX:
             self.off_route = True
 
     # ------------------------------------------------------------------
@@ -736,26 +759,65 @@ class InterSection(gym.Env):
             target_speed = v0
         return target_speed
 
-    def visualize_waypoints(self, life_time=60.0):
-        """Draw wp (green) and wp2 (red) in the CARLA world for debugging."""
+    def _make_target(self, xy):
+        """Create carla.Location at (xy[0], xy[1]) with z snapped from the road map."""
+        x, y = float(xy[0]), float(xy[1])
+        z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z
+        return carla.Location(x=x, y=y, z=z)
+
+    def visualize_waypoints(self, life_time=120.0):
+        """Draw wp (green) and wp2 (cyan) plus START/END markers in CARLA."""
         for point in self.wp:
             x, y = float(point[0]), float(point[1])
-            z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z + 0.1
+            z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z + 0.2
             self.world.debug.draw_point(
                 carla.Location(x=x, y=y, z=z),
                 size=0.08,
-                color=carla.Color(0, 255, 0),   # green → inner lane
+                color=carla.Color(0, 255, 0),   # green → route 1
                 life_time=life_time,
             )
         for point in self.wp2:
             x, y = float(point[0]), float(point[1])
-            z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z + 0.1
+            z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z + 0.2
             self.world.debug.draw_point(
                 carla.Location(x=x, y=y, z=z),
                 size=0.08,
-                color=carla.Color(255, 0, 0),   # red → outer lane
+                color=carla.Color(0, 255, 255), # cyan → route 2
                 life_time=life_time,
             )
+
+        def _z(x, y):
+            return self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z
+
+        # START marker — yellow
+        sx, sy = _SPAWN_X, _SPAWN_Y
+        sz = _z(sx, sy)
+        self.world.debug.draw_point(
+            carla.Location(x=sx, y=sy, z=sz + 1.0),
+            size=0.4, color=carla.Color(255, 255, 0), life_time=life_time)
+        self.world.debug.draw_string(
+            carla.Location(x=sx, y=sy, z=sz + 3.5), 'START',
+            color=carla.Color(255, 255, 0), life_time=life_time)
+
+        # END1 marker — green (route 1 terminus)
+        e1x, e1y = _END1_X, _END1_Y
+        e1z = _z(e1x, e1y)
+        self.world.debug.draw_point(
+            carla.Location(x=e1x, y=e1y, z=e1z + 1.0),
+            size=0.4, color=carla.Color(0, 255, 0), life_time=life_time)
+        self.world.debug.draw_string(
+            carla.Location(x=e1x, y=e1y, z=e1z + 3.5), 'END1',
+            color=carla.Color(0, 255, 0), life_time=life_time)
+
+        # END2 marker — cyan (route 2 terminus)
+        e2x, e2y = _END2_X, _END2_Y
+        e2z = _z(e2x, e2y)
+        self.world.debug.draw_point(
+            carla.Location(x=e2x, y=e2y, z=e2z + 1.0),
+            size=0.4, color=carla.Color(0, 255, 255), life_time=life_time)
+        self.world.debug.draw_string(
+            carla.Location(x=e2x, y=e2y, z=e2z + 3.5), 'END2',
+            color=carla.Color(0, 255, 255), life_time=life_time)
 
     def _next_weather(self, reverse=False):
         self._weather_index += -1 if reverse else 1

@@ -35,9 +35,6 @@ _SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  30.0, 0.5
 _END1_X,  _END1_Y             = -78.0,  -0.7
 _END2_X,  _END2_Y             = -78.0,  -4.2
 # Derived: camera and off-route bounds auto-adjust with the coordinates above
-_CAM_X = (_SPAWN_X + (_END1_X + _END2_X) / 2) / 2
-_CAM_Y = (_SPAWN_Y + (_END1_Y + _END2_Y) / 2) / 2
-_CAM_Z = 120.0
 _BOUND_X_MIN = min(_SPAWN_X, _END1_X, _END2_X) - 15
 _BOUND_X_MAX = max(_SPAWN_X, _END1_X, _END2_X) + 15
 _BOUND_Y_MIN = min(_SPAWN_Y, _END1_Y, _END2_Y) - 10
@@ -331,8 +328,7 @@ class InterSection(gym.Env):
 
         self.visualize_waypoints()
 
-        # Static overhead camera — set once, never updated in step().
-        self.spect_cam_static()
+        self.spect_cam_follow()
 
         # Give BasicAgent the far end of route 1 as initial destination.
         self.agent.set_destination(self._make_target(self.wp[-1]))
@@ -538,12 +534,14 @@ class InterSection(gym.Env):
                 self_trajs[-i, :] = np.array(queryed_trajs[queryed_time])
         return self_trajs
 
-    def spect_cam_static(self):
-        """Fixed overhead camera centred on the turn scene.  Called once in reset()."""
+    def spect_cam_follow(self):
+        """Overhead camera that follows the ego vehicle at z=30, pitch=-60°."""
+        if self.ego_vehicle is None:
+            return
         self.spectator = self.world.get_spectator()
-        # Centre between spawn (-47,-30) and endpoints (-78,~2.5)
-        cam_loc = carla.Location(x=_CAM_X, y=_CAM_Y, z=_CAM_Z)
-        cam_rot = carla.Rotation(pitch=-89.0, yaw=0.0, roll=0.0)
+        ego_loc = self.ego_vehicle.get_location()
+        cam_loc = carla.Location(x=ego_loc.x, y=ego_loc.y, z=ego_loc.z + 30.0)
+        cam_rot = carla.Rotation(pitch=-60.0, yaw=0.0, roll=0.0)
         self.spectator.set_transform(carla.Transform(cam_loc, cam_rot))
 
     def get_observation_scene(self):
@@ -658,16 +656,11 @@ class InterSection(gym.Env):
         print(f"[DBG] step={self.count:3d} x={x_ego:.2f} y={y_ego:.2f} "
               f"r=({float(r[0]):.2f},{float(r[1]):.2f}) "
               f"steer={self.control.steer:.3f} thr={self.control.throttle:.3f}")
-        for i, v in enumerate(self.obs_actors):
-            vc = v.get_control()
-            vl = v.get_location()
-            print(f"  [OBS{i}] x={vl.x:.2f} y={vl.y:.2f} "
-                  f"thr={vc.throttle:.3f} brake={vc.brake:.3f}")
 
         self.ego_vehicle.apply_control(self.control)
 
         next_state = self.get_observation_scene()
-        # camera is static — no per-step update needed
+        self.spect_cam_follow()
 
         self.collision = self.get_collision_history()[1]
 

@@ -626,8 +626,7 @@ class InterSection(gym.Env):
         # With min=1 the destination was only 0.5 m ahead at low speed, causing
         # the agent to reach-and-brake each tick instead of driving smoothly.
         preview_dis = round(np.clip(velocity_ego * 2, 10, 30))
-        wp_list = self.filter_planned_ego_waypoints(self.ego_vehicle, preview_dis)
-        _, r, _ = wp_list
+        self.filter_planned_ego_waypoints(self.ego_vehicle, preview_dis)
 
         try:
             # Guide BasicAgent to the END of the chosen route, not a per-step
@@ -657,8 +656,9 @@ class InterSection(gym.Env):
         x_ego = self.ego_vehicle.get_location().x
 
         print(f"[DBG] step={self.count:3d} x={x_ego:.2f} y={y_ego:.2f} "
-              f"r=({float(r[0]):.2f},{float(r[1]):.2f}) "
-              f"steer={self.control.steer:.3f} thr={self.control.throttle:.3f}")
+              f"spd={velocity_ego:.2f}m/s tgt={self.target_speed:.1f}km/h "
+              f"steer={self.control.steer:.3f} "
+              f"thr={self.control.throttle:.3f} brake={self.control.brake:.3f}")
 
         self.ego_vehicle.apply_control(self.control)
 

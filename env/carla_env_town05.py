@@ -535,13 +535,16 @@ class InterSection(gym.Env):
         return self_trajs
 
     def spect_cam_follow(self):
-        """Overhead camera that follows the ego vehicle at z=30, pitch=-60°."""
+        """Top-down camera that follows the ego, yaw locked to ego heading so
+        the vehicle's forward direction always points up in the view."""
         if self.ego_vehicle is None:
             return
         self.spectator = self.world.get_spectator()
-        ego_loc = self.ego_vehicle.get_location()
-        cam_loc = carla.Location(x=ego_loc.x, y=ego_loc.y, z=ego_loc.z + 30.0)
-        cam_rot = carla.Rotation(pitch=-60.0, yaw=0.0, roll=0.0)
+        ego_tf = self.ego_vehicle.get_transform()
+        ego_loc = ego_tf.location
+        ego_yaw = ego_tf.rotation.yaw
+        cam_loc = carla.Location(x=ego_loc.x, y=ego_loc.y, z=ego_loc.z + 40.0)
+        cam_rot = carla.Rotation(pitch=-90.0, yaw=ego_yaw, roll=0.0)
         self.spectator.set_transform(carla.Transform(cam_loc, cam_rot))
 
     def get_observation_scene(self):

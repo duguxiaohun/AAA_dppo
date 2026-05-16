@@ -61,12 +61,12 @@ def start_carla(port):
     # 启动CARLA并指定端口
     subprocess.Popen(['/home/codon/CARLA/CARLA_0.9.12/CarlaUE4.sh',
                       '-port={}'.format(port),
-                    #   '-RenderOffScreen'
+                      '-RenderOffScreen'
                       ])
 
 @hydra.main(
     version_base=None,
-    config_path="../cfg/gym/finetune/carla",
+    config_path="../cfg/gym/finetune/hopper-v2",
     config_name="ft_ppo_diffusion_mlp",
 )
 def main(cfg: OmegaConf):
@@ -123,10 +123,9 @@ def main(cfg: OmegaConf):
 if __name__ == "__main__":
     main()
 # ── Usage examples ────────────────────────────────────────────────────────
-# Town05 (default):   PYTHONPATH=$(pwd) python script/run.py
-# Town10:             PYTHONPATH=$(pwd) python script/run.py town_id=10
-# Eval variant:       PYTHONPATH=$(pwd) python script/run.py --config-name=ft_ppo_diffusion_mlp_eval town_id=10
-# Hopper baseline:    PYTHONPATH=$(pwd) python script/run.py --config-dir=cfg/gym/finetune/hopper-v2 --config-name=ft_ppo_diffusion_mlp
+# 默认配置运行:       PYTHONPATH=$(pwd) python script/run.py
+# 切换环境运行:       PYTHONPATH=$(pwd) python script/run.py carla_env_interface=CarlaTown05Cross-v0
+# 打印最终配置检查:   PYTHONPATH=$(pwd) python script/run.py --cfg job
 # export https_proxy=http://127.0.0.1:7890
 
 # export PYTHONPATH="$PYTHONPATH:/home/codon/github/第二篇"

@@ -107,7 +107,7 @@ class InterSection(gym.Env):
         self._weather_index = 8
 
         settings = self.world.get_settings()
-        settings.no_rendering_mode = False
+        settings.no_rendering_mode = True
         self.world.apply_settings(settings)
 
         self.seed = seed
@@ -184,8 +184,6 @@ class InterSection(gym.Env):
             _init_yaw = math.degrees(math.atan2(dy, dx))
         else:
             _init_yaw = 0.0
-
-        print(f"[ROUTE] wp={len(self.wp)} pts, wp2={len(self.wp2)} pts, init_yaw={_init_yaw:.1f}°")
 
         # ---- Ego vehicle ----
         bp_ego = self.world.get_blueprint_library().filter('vehicle.mercedes.coupe_2020')[0]
@@ -666,11 +664,6 @@ class InterSection(gym.Env):
         vel = self.ego_vehicle.get_velocity()
         velocity_ego = (vel.x ** 2 + vel.y ** 2 + vel.z ** 2) ** 0.5
 
-        print(f"[DBG] step={self.count:3d} x={x_ego:.2f} y={y_ego:.2f} "
-              f"spd={velocity_ego:.2f}m/s tgt={self.target_speed:.1f}km/h "
-              f"steer={self.control.steer:.3f} "
-              f"thr={self.control.throttle:.3f} brake={self.control.brake:.3f}")
-
         self.ego_vehicle.apply_control(self.control)
 
         next_state = self.get_observation_scene()
@@ -686,9 +679,6 @@ class InterSection(gym.Env):
         )
         self.max_time = self.count > 300
 
-        if self.collision:
-            print('Collision!')
-
         success = 2 if self.finish else 0
         coll = -1 if self.collision else 0
         coll = coll - 1 if self.off_route else coll
@@ -696,18 +686,7 @@ class InterSection(gym.Env):
 
         self.record_one_step_total()
 
-        if self.finish or self.collision or self.off_route or self.max_time:
-            done = True
-            if self.finish:
-                print("finish is True")
-            elif self.collision:
-                print("collision is True")
-            elif self.off_route:
-                print("off_route is True")
-            elif self.max_time:
-                print("max_time is True")
-        else:
-            done = False
+        done = self.finish or self.collision or self.off_route or self.max_time
 
         speed_reward = velocity_ego
         reward = success + coll + 0.1 * speed_reward

@@ -781,8 +781,8 @@ class InterSection(gym.Env):
         self.finish = (y_ego > -40) and (x_ego > -54 and x_ego < -48.5)
         self.max_time = self.count > 300
 
-        if self.collision:
-            print('Collision!')
+        # if self.collision:
+        #     print('Collision!')
 
         success = 2 if self.finish else 0
         coll = -1 if self.collision else 0

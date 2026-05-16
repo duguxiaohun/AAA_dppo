@@ -686,7 +686,19 @@ class InterSection(gym.Env):
 
         self.record_one_step_total()
 
-        done = self.finish or self.collision or self.off_route or self.max_time
+        if self.finish or self.collision or self.off_route or self.max_time:
+            done = True
+            if self.finish:
+                print("finish is True")
+            elif self.collision:
+                print("collision is True")
+            elif self.off_route:
+                print("off_route is True")
+            elif self.max_time:
+                print("max_time is True")
+        else:
+            done = False
+
 
         speed_reward = velocity_ego
         reward = success + coll + 0.1 * speed_reward

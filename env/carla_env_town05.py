@@ -625,26 +625,34 @@ class InterSection(gym.Env):
         preview_dis = round(np.clip(velocity_ego * 2, 1, 15))
         self.filter_planned_ego_waypoints(self.ego_vehicle, preview_dis)
 
+        # LocalPlanner._base_min_distance = 3.0 m.  At low speed the short
+        # preview_dis destination is immediately within min_distance → queue
+        # empties → brake=1.0 (stop).  Use at least 10 steps (≈5 m) so the
+        # queue always has enough waypoints and the heading PID has a stable
+        # lookahead (prevents left-right oscillation at short range too).
+        nav_dis = max(preview_dis, 10)
+
+        # Mirror original carla_env: force straight in the approach section
+        # (y > 2.0 means ego is still north of the intersection entry).
+        if y_ego > 2.0:
+            lat_action = 0
+
         try:
-            # Use road-network waypoints (not spline-route points) as per-step
-            # destinations so BasicAgent always gets an on-road target.
-            # Mirrors the original carla_env lane-change logic, without the
-            # C++ temp-object bug (target_location.x = ... is a no-op there).
             waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
             if lat_action == -1:
                 left_lane = waypoint.get_left_lane()
                 if (waypoint.lane_change & carla.LaneChange.Left != 0) and left_lane is not None:
-                    nexts = left_lane.next(preview_dis)
+                    nexts = left_lane.next(nav_dis)
                 else:
-                    nexts = waypoint.next(preview_dis)
+                    nexts = waypoint.next(nav_dis)
             elif lat_action == 1:
                 right_lane = waypoint.get_right_lane()
                 if (waypoint.lane_change & carla.LaneChange.Right != 0) and right_lane is not None:
-                    nexts = right_lane.next(preview_dis)
+                    nexts = right_lane.next(nav_dis)
                 else:
-                    nexts = waypoint.next(preview_dis)
+                    nexts = waypoint.next(nav_dis)
             else:
-                nexts = waypoint.next(preview_dis)
+                nexts = waypoint.next(nav_dis)
             if nexts:
                 self.agent.set_destination(nexts[0].transform.location)
         except Exception:

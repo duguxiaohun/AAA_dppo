@@ -26,7 +26,7 @@ cond_steps: 1
 horizon_steps: 1
 act_steps: 1
 memory_size: 200000  # number of trajectories
-warm_up: 1        # 与代码 explore_env(5000) 保持一致
+warm_up: 5000        # 与代码 explore_env(5000) 保持一致
 tau: 0.005           # 修正：标准 SAC/TD3 值，0.05 过大会使 target 网络太不稳
 
 env:

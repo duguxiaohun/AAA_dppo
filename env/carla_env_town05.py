@@ -654,6 +654,9 @@ class InterSection(gym.Env):
         self.control = self.agent.run_step()
         y_ego = self.ego_vehicle.get_location().y
         x_ego = self.ego_vehicle.get_location().x
+        # Read velocity AFTER tick so it matches the post-tick x,y position.
+        vel = self.ego_vehicle.get_velocity()
+        velocity_ego = (vel.x ** 2 + vel.y ** 2 + vel.z ** 2) ** 0.5
 
         print(f"[DBG] step={self.count:3d} x={x_ego:.2f} y={y_ego:.2f} "
               f"spd={velocity_ego:.2f}m/s tgt={self.target_speed:.1f}km/h "

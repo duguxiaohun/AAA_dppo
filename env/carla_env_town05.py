@@ -626,17 +626,20 @@ class InterSection(gym.Env):
         # the agent to reach-and-brake each tick instead of driving smoothly.
         preview_dis = round(np.clip(velocity_ego * 2, 10, 30))
         wp_list = self.filter_planned_ego_waypoints(self.ego_vehicle, preview_dis)
-        lr, r, rr = wp_list
+        _, r, _ = wp_list
 
         try:
-            # lr = route-1 (wp), r = closer route, rr = route-2 (wp2)
-            if lat_action == -1:
-                target = lr if lr is not None else r
-            elif lat_action == 1:
-                target = rr if rr is not None else r
+            # Guide BasicAgent to the END of the chosen route, not a per-step
+            # lookahead.  Per-step intermediate points from the spline-smoothed
+            # route can lie off the CARLA road network; BasicAgent then plans an
+            # intersection-crossing detour that causes steer=-0.8 (south drift).
+            # Route ends (-78,-0.7) and (-78,-4.2) are valid on-road points that
+            # BasicAgent can reach straight from the current westbound position.
+            if lat_action == 1:
+                dest = self.wp2[-1]   # outer lane → route-2 end
             else:
-                target = r
-            self.agent.set_destination(self._make_target(target))
+                dest = self.wp[-1]    # inner lane (lat_action -1 or 0) → route-1 end
+            self.agent.set_destination(self._make_target(dest))
         except Exception:
             pass
 
@@ -754,10 +757,12 @@ class InterSection(gym.Env):
         return target_speed
 
     def _make_target(self, xy):
-        """Create carla.Location at (xy[0], xy[1]) with z snapped from the road map."""
+        """Snap xy to the nearest CARLA road waypoint and return its Location.
+        Using the raw spline-route x,y (which can be off-road) caused BasicAgent
+        to plan detour routes through the intersection → steer=-0.8."""
         x, y = float(xy[0]), float(xy[1])
-        z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z
-        return carla.Location(x=x, y=y, z=z)
+        road_wp = self.map.get_waypoint(carla.Location(x, y, 0))
+        return road_wp.transform.location
 
     def visualize_waypoints(self, life_time=120.0):
         """Draw wp (green) and wp2 (cyan) plus START/END markers in CARLA."""

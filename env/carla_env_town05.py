@@ -31,7 +31,7 @@ screen_width, screen_height = 640, 360
 WIDTH, HEIGHT, PACK = 80, 45, 4
 
 # ── Scenario key coordinates — only edit here to move the scenario ────────────
-_SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  30.0, 0.5
+_SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  25.0, 0.5
 _END1_X,  _END1_Y             = -78.0,  -0.7
 _END2_X,  _END2_Y             = -78.0,  -4.2
 # Derived: camera and off-route bounds auto-adjust with the coordinates above
@@ -622,24 +622,31 @@ class InterSection(gym.Env):
         self.target_speed = target_speed
         self.agent.set_target_speed(self.target_speed)
 
-        # Minimum 10 waypoints (5 m) so BasicAgent always has a stable lookahead target.
-        # With min=1 the destination was only 0.5 m ahead at low speed, causing
-        # the agent to reach-and-brake each tick instead of driving smoothly.
-        preview_dis = round(np.clip(velocity_ego * 2, 10, 30))
+        preview_dis = round(np.clip(velocity_ego * 2, 1, 15))
         self.filter_planned_ego_waypoints(self.ego_vehicle, preview_dis)
 
         try:
-            # Guide BasicAgent to the END of the chosen route, not a per-step
-            # lookahead.  Per-step intermediate points from the spline-smoothed
-            # route can lie off the CARLA road network; BasicAgent then plans an
-            # intersection-crossing detour that causes steer=-0.8 (south drift).
-            # Route ends (-78,-0.7) and (-78,-4.2) are valid on-road points that
-            # BasicAgent can reach straight from the current westbound position.
-            if lat_action == 1:
-                dest = self.wp2[-1]   # outer lane → route-2 end
+            # Use road-network waypoints (not spline-route points) as per-step
+            # destinations so BasicAgent always gets an on-road target.
+            # Mirrors the original carla_env lane-change logic, without the
+            # C++ temp-object bug (target_location.x = ... is a no-op there).
+            waypoint = self.map.get_waypoint(self.ego_vehicle.get_location())
+            if lat_action == -1:
+                left_lane = waypoint.get_left_lane()
+                if (waypoint.lane_change & carla.LaneChange.Left != 0) and left_lane is not None:
+                    nexts = left_lane.next(preview_dis)
+                else:
+                    nexts = waypoint.next(preview_dis)
+            elif lat_action == 1:
+                right_lane = waypoint.get_right_lane()
+                if (waypoint.lane_change & carla.LaneChange.Right != 0) and right_lane is not None:
+                    nexts = right_lane.next(preview_dis)
+                else:
+                    nexts = waypoint.next(preview_dis)
             else:
-                dest = self.wp[-1]    # inner lane (lat_action -1 or 0) → route-1 end
-            self.agent.set_destination(self._make_target(dest))
+                nexts = waypoint.next(preview_dis)
+            if nexts:
+                self.agent.set_destination(nexts[0].transform.location)
         except Exception:
             pass
 

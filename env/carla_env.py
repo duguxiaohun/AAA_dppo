@@ -134,7 +134,7 @@ class InterSection(gym.Env):
         ## initialize the pygame settings
 
         settings = self.world.get_settings()
-        settings.no_rendering_mode = not render
+        settings.no_rendering_mode = True
         self.world.apply_settings(settings)
 
         self.seed = seed

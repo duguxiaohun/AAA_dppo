@@ -14,8 +14,8 @@ seed: 42
 device: cuda:0
 # 环境切换接口：默认 Town05 十字路口左转场景
 # 也可命令行覆盖：python script/run.py carla_env_interface=CarlaTown05Cross-v0
-# carla_env_interface: CarlaTown05Cross-v0
-carla_env_interface: CarlaTown10Cross-v0
+carla_env_interface: CarlaTown05Cross-v0
+# carla_env_interface: CarlaTown10Cross-v0
 
 env_name: ${carla_env_interface}
 obs_dim: 128
@@ -74,6 +74,7 @@ train:
   update_epochs: 5
   vf_coef: 0.5
   target_kl: 0.05      # 修正：1.0 使 early stop 失效，标准值 0.01~0.05
+  critic_q_update_steps: 20  # Q网络每个iteration更新次数（标准off-policy建议10~50）
 
 
 

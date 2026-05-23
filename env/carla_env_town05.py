@@ -593,7 +593,7 @@ class InterSection(gym.Env):
 
         return (speed * 3.6, lane)
 
-    def step(self, action):
+    def step(self, action):   # avoid server timeout during long computations
         vx_ego = self.ego_vehicle.get_velocity().x
         vy_ego = self.ego_vehicle.get_velocity().y
         velocity_ego = (vx_ego ** 2 + vy_ego ** 2 +

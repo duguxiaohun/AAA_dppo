@@ -249,14 +249,19 @@ class PPODiffusion(VPGDiffusion):
                                              num_atoms=self.critic.num_atoms,
                                              support=self.critic.z_atoms,
                                              device=self.device)
-            target_Q = torch.min(target_Q1_projected, target_Q2_projected)
+            # Element-wise min of two probability distributions is invalid (rows no longer sum to 1).
+            # Instead, select the whole distribution from whichever head has the lower expected Q.
+            z = self.critic.z_atoms.to(self.device)
+            exp_Q1 = (target_Q1_projected * z).sum(dim=1, keepdim=True)  # (B, 1)
+            exp_Q2 = (target_Q2_projected * z).sum(dim=1, keepdim=True)  # (B, 1)
+            target_Q = torch.where(exp_Q1 < exp_Q2, target_Q1_projected, target_Q2_projected)
 
         current_Q1, current_Q2 = self.critic.get_q1_q2(obs, action)
-        # critic_loss = F.binary_cross_entropy(current_Q1, target_Q) + F.binary_cross_entropy(current_Q2, target_Q)
         critic_loss = -torch.sum(target_Q * torch.log(current_Q1 + 1e-8), dim=1).mean() \
                       - torch.sum(target_Q * torch.log(current_Q2 + 1e-8), dim=1).mean()
 
         return critic_loss
+        # return critic_loss.item()
 
 
 

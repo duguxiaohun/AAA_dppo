@@ -203,7 +203,7 @@ class InterSection(gym.Env):
 
         spawn_point_ego = self.world.get_map().get_spawn_points()[0]
 
-        rangee = 0
+        rangee = 5
         spawn_point_ego.location.x =  - rangee * random.random()
         # spawn_point_ego.location.x =  -1.4325
 

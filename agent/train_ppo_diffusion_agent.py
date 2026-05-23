@@ -80,6 +80,8 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
             lr=cfg.train.critic_lr,
             weight_decay=cfg.train.critic_weight_decay,
         )
+        # Number of Q-network gradient steps per iteration (standard off-policy: ~1 per env step)
+        self.critic_q_update_steps = cfg.train.get("critic_q_update_steps", 20)
 
 
 
@@ -521,6 +523,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                             "neighbor_waypoints": nw,
                         })
 
+                    obs_k_encoded_list = []
                     values_trajs = np.empty((0, self.n_envs))
                     for obs in obs_ts_k:
                         obs, _ = self.model.encoder(
@@ -530,10 +533,12 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                             init_state=obs['ego_state'],
                             map_state=obs['neighbor_waypoints']
                         )
+                        obs_k_encoded_list.append(obs)
                         values = self.model.critic.get_v(obs).cpu().numpy().flatten()
                         values_trajs = np.vstack(
                             (values_trajs, values.reshape(-1, self.n_envs))
                         )
+                    obs_k_encoded = torch.cat(obs_k_encoded_list, dim=0)  # (n_steps*n_envs, obs_dim)
 
                     # (n_steps, n_envs) for furniture
 
@@ -681,12 +686,8 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         # torch.Size([50000])
                         # torch.Size([50000])
 
-                        obs_b = {
-                            "neighbor_trajs": obs_k["neighbor_trajs"][batch_inds_b],
-                            "ego_state": obs_k["ego_state"][batch_inds_b],
-                            "neighbor_waypoints": obs_k["neighbor_waypoints"][batch_inds_b],
-                        }
-                        # (batch, n_cond_step, obs_dim) for furniture
+                        # Use pre-encoded tensor to skip 780 redundant encoder forward passes
+                        obs_b = obs_k_encoded[batch_inds_b]
 
                         chains_prev_b = chains_k[batch_inds_b, denoising_inds_b]
                         # (batch,  horizon_steps, action_dim) for furniture
@@ -757,6 +758,10 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         break
 
                 # Off-policy 更新在 PPO 之后执行，保证 trust region 完整
+                # Clone original actions before Q-improvement: update_target_action modifies action
+                # in-place via Adam, so critic must receive the original environment actions.
+                action_orig = action_venv.clone()
+
                 # 3. Update target action（使用已收敛的 Q 网络）
                 _, new_action = self.model.update_target_action(prev_obs, action_venv)
                 self.diffusion_buffer.update_target_action(new_action)
@@ -789,11 +794,36 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         init_state=next_obs['ego_state'],
                         map_state=next_obs['neighbor_waypoints']
                     )
-                self.critic_q_optimizer.zero_grad()
-                critic_loss = self.model.update_critic(prev_obs2, action_venv, reward_venv, next_obs2, done_venvv)
-                critic_loss.backward()
-                self.critic_q_optimizer.step()
-                critic_loss = critic_loss.item()
+                critic_loss = 0.0
+                for _ in range(self.critic_q_update_steps):
+                    q_batch = self.diffusion_buffer.sample_batch(self.batch_size)
+                    qb_obs, qb_action, _, qb_reward, qb_next_obs, qb_done = q_batch
+                    with torch.no_grad():
+                        qb_obs_enc, _ = self.model.encoder(
+                            qb_obs['neighbor_trajs'], mask=None, test=qb_obs,
+                            init_state=qb_obs['ego_state'], map_state=qb_obs['neighbor_waypoints']
+                        )
+                        qb_next_enc, _ = self.model.target_encoder(
+                            qb_next_obs['neighbor_trajs'], mask=None, test=qb_next_obs,
+                            init_state=qb_next_obs['ego_state'], map_state=qb_next_obs['neighbor_waypoints']
+                        )
+                        # Buffer stores raw scaled reward; add intrinsic bonus consistent with on-policy collection
+                        qb_reward = qb_reward + self.intrinsic.compute_reward(qb_obs_enc, qb_next_enc)
+                    self.critic_q_optimizer.zero_grad()
+                    _closs = self.model.update_critic(qb_obs_enc, qb_action, qb_reward, qb_next_enc, qb_done)
+                    # _closs.backward()
+                    if self.max_grad_norm is not None:
+                        torch.nn.utils.clip_grad_norm_(
+                            list(self.model.critic.net_q1.parameters()) +
+                            list(self.model.critic.net_q2.parameters()),
+                            self.max_grad_norm,
+                        )
+                    self.critic_q_optimizer.step()
+                    # Standard: soft-update target network once per gradient step
+                    soft_update(self.model.critic_target, self.model.critic, self.tau)
+                    critic_loss += _closs.item()
+                critic_loss /= self.critic_q_update_steps
+                self.rep_func._update_params(self.tau)
 
                 with torch.no_grad():
                     prev_obs3, _ = self.model.encoder(
@@ -816,8 +846,6 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                     dynamic_loss, dynamic_grad_norm = self.intrinsic.update(torch.cat([prev_obs3, next_obs3]))
                 else:
                     raise NotImplementedError
-                soft_update(self.model.critic_target, self.model.critic, self.tau)
-                self.rep_func._update_params(self.tau)
                 # Explained variation of future rewards using value function
                 y_pred, y_true = values_k.cpu().numpy(), returns_k.cpu().numpy()
                 var_y = np.var(y_true)
@@ -894,7 +922,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         f"TRAIN {prog} step={cnt_train_step:7d} | "
                         f"succ(20ep)={succ_20:.3f} | succ(100ep)={succ_100:.3f} | succ(all)={succ_all:.3f} | "
                         f"reward={avg_episode_reward:.4f} | loss={loss:.4f} | "
-                        f"pg={pg_loss:.4f} | vf={v_loss:.4f} | bc={bc_loss:.4f} | "
+                        f"pg={pg_loss:.4f} | critic_v={v_loss:.4f} | critic_q={critic_loss:.4f} | bc={bc_loss:.4f} | "
                         f"eta={eta:.4f} | t={time:.1f}s"
                     )
                     if self.use_wandb:
@@ -903,11 +931,13 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                                 "total env step": cnt_train_step,
                                 "loss": loss,
                                 "pg loss": pg_loss,
-                                "value loss": v_loss,
+                                # critic/v_loss: PPO state-value network (net_v), trained with MSE on GAE returns
+                                "critic/v_loss": v_loss,
+                                # critic/q_loss: distributional Q network (net_q1/q2), trained with C51 cross-entropy
+                                "critic/q_loss": critic_loss,
                                 "bc loss": bc_loss,
                                 "new_bc_loss": bcloss,
                                 "dynamic_loss": dynamic_loss,
-                                "new_critic_loss": critic_loss,
                                 "eta": eta,
                                 "approx kl": approx_kl,
                                 "ratio": ratio,

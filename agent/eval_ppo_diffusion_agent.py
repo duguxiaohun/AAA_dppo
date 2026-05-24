@@ -70,27 +70,50 @@ class EvalPPODiffusionAgent(TrainAgent):
         return int(m.group(1)) if m else -1
 
     def _collect_checkpoints(self):
-        ckpt_dir = os.path.abspath(self.eval_cfg.checkpoint_dir)
-        if not os.path.isdir(ckpt_dir):
-            raise FileNotFoundError(f"checkpoint_dir does not exist: {ckpt_dir}")
+        checkpoint_dir = self.eval_cfg.get("checkpoint_dir", "")
+        checkpoint_root = self.eval_cfg.get("checkpoint_root", "")
 
-        step = int(self.eval_cfg.get("checkpoint_step", -1))
-        if step >= 0:
-            ckpt_path = os.path.join(ckpt_dir, f"state_{step}.pt")
-            if not os.path.isfile(ckpt_path):
-                raise FileNotFoundError(f"checkpoint not found: {ckpt_path}")
-            return [ckpt_path]
+        if checkpoint_dir:
+            # Direct mode: checkpoint_dir points to a specific run's checkpoint folder.
+            ckpt_dir = os.path.abspath(checkpoint_dir)
+            if not os.path.isdir(ckpt_dir):
+                raise FileNotFoundError(f"checkpoint_dir does not exist: {ckpt_dir}")
 
-        pattern = os.path.join(ckpt_dir, self.eval_cfg.checkpoint_pattern)
-        ckpts = [p for p in glob.glob(pattern) if os.path.isfile(p)]
-        if len(ckpts) == 0:
-            raise FileNotFoundError(
-                f"No checkpoint found under: {ckpt_dir} with pattern {self.eval_cfg.checkpoint_pattern}"
-            )
+            step = int(self.eval_cfg.get("checkpoint_step", -1))
+            if step >= 0:
+                ckpt_path = os.path.join(ckpt_dir, f"state_{step}.pt")
+                if not os.path.isfile(ckpt_path):
+                    raise FileNotFoundError(f"checkpoint not found: {ckpt_path}")
+                return [ckpt_path]
 
-        # 默认每次只评估一个：取目录内最后一个 ckpt。
-        latest = sorted(ckpts, key=lambda p: (self._extract_step(p), p))[-1]
-        return [latest]
+            pattern = os.path.join(ckpt_dir, self.eval_cfg.checkpoint_pattern)
+            ckpts = [p for p in glob.glob(pattern) if os.path.isfile(p)]
+            if not ckpts:
+                raise FileNotFoundError(
+                    f"No checkpoint found under: {ckpt_dir} with pattern {self.eval_cfg.checkpoint_pattern}"
+                )
+            latest = sorted(ckpts, key=lambda p: (self._extract_step(p), p))[-1]
+            return [latest]
+
+        elif checkpoint_root:
+            # Scan mode: walk checkpoint_root looking for state_*.pt files in */checkpoint/ dirs.
+            root = os.path.abspath(checkpoint_root)
+            if not os.path.isdir(root):
+                raise FileNotFoundError(f"checkpoint_root does not exist: {root}")
+            pattern = os.path.join(root, "**", self.eval_cfg.checkpoint_pattern)
+            ckpts = [p for p in glob.glob(pattern, recursive=True) if os.path.isfile(p)]
+            if not ckpts:
+                raise FileNotFoundError(
+                    f"No checkpoint found under: {root} with pattern {self.eval_cfg.checkpoint_pattern}"
+                )
+            ckpts = sorted(ckpts, key=lambda p: (self._extract_step(p), p))
+            max_ckpts = int(self.eval_cfg.get("max_checkpoints", -1))
+            if max_ckpts > 0:
+                ckpts = ckpts[-max_ckpts:]
+            return ckpts
+
+        else:
+            raise ValueError("eval config must set either checkpoint_dir or checkpoint_root")
 
     def _run_one_episode(self, max_steps):
         obs = self.reset_env_all(options_venv=[{} for _ in range(self.n_envs)])
@@ -327,8 +350,9 @@ class EvalPPODiffusionAgent(TrainAgent):
     def run(self):
         ckpts = self._collect_checkpoints()
         if len(ckpts) == 0:
+            src = self.eval_cfg.get("checkpoint_dir", "") or self.eval_cfg.get("checkpoint_root", "")
             raise FileNotFoundError(
-                f"No checkpoint found under: {self.eval_cfg.checkpoint_dir} with pattern {self.eval_cfg.checkpoint_pattern}"
+                f"No checkpoint found under: {src} with pattern {self.eval_cfg.checkpoint_pattern}"
             )
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

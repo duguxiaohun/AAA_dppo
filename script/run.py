@@ -55,14 +55,13 @@ def kill_carla():
             process.kill()
 
 
-def start_carla(port):
+def start_carla(port, visualize=False):
     """启动CARLA"""
     print("正在启动CARLA...")
-    # 启动CARLA并指定端口
-    subprocess.Popen(['/home/codon/CARLA/CARLA_0.9.12/CarlaUE4.sh',
-                      '-port={}'.format(port),
-                      '-RenderOffScreen'
-                      ])
+    cmd = ['/home/codon/CARLA/CARLA_0.9.12/CarlaUE4.sh', '-port={}'.format(port)]
+    if not visualize:
+        cmd.append('-RenderOffScreen')
+    subprocess.Popen(cmd)
 
 @hydra.main(
     version_base=None,
@@ -72,7 +71,9 @@ def start_carla(port):
 def main(cfg: OmegaConf):
     kill_carla()
     time.sleep(5)
-    start_carla(port=2000)
+    visualize = bool(cfg.get('visualize', False))
+    os.environ['CARLA_VISUALIZE'] = str(visualize)
+    start_carla(port=2000, visualize=visualize)
     time.sleep(5)
     # resolve immediately so all the ${now:} resolvers will use the same time.
     OmegaConf.resolve(cfg)

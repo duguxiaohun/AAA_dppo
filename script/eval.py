@@ -63,23 +63,19 @@ def start_carla(port, quality="Epic", offscreen=True):
 @hydra.main(
     version_base=None,
     config_path="../cfg/gym/finetune/hopper-v2",
-    config_name="ft_ppo_diffusion_mlp",
+    config_name="eval_base",
 )
 def main(cfg: OmegaConf):
-    # 评估脚本强制使用纯评估 agent，避免误触发训练逻辑
-    cfg._target_ = cfg.eval.agent_target
-
-    # 评估脚本独立 wandb 命名，避免和训练记录混淆
-    if "wandb" in cfg and cfg.wandb is not None:
-        cfg.wandb.project = cfg.eval.wandb_project
-        cfg.wandb.run = f"{cfg.eval.wandb_run_prefix}_{cfg.env_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    # _target_ already set to EvalPPODiffusionAgent in eval_base.yaml
 
     kill_carla()
     time.sleep(5)
+    visualize = bool(cfg.get('visualize', False))
+    os.environ['CARLA_VISUALIZE'] = str(visualize)
     start_carla(
         port=int(cfg.eval.carla_port),
         quality=str(cfg.eval.carla_quality),
-        offscreen=bool(cfg.eval.carla_offscreen),
+        offscreen=not visualize,
     )
     time.sleep(5)
 

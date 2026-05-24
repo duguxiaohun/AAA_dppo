@@ -435,16 +435,24 @@ class DistributionalDoubleQ(torch.nn.Module):
 
 
         q1 = self.net_q1(input_x)
-
-
         q2 = self.net_q2(input_x)
-
 
         prob1 = torch.softmax(q1, dim=1)
         prob2 = torch.softmax(q2, dim=1)
 
-
         return prob1, prob2
+
+    def get_q1_q2_logits(self, cond, action):
+        """Return raw logits for numerically stable cross-entropy loss."""
+        if isinstance(cond, dict):
+            B = len(cond["state"])
+            state = cond["state"].view(B, -1)
+        else:
+            B = cond.shape[0]
+            state = cond.view(B, -1)
+        action = action.view(B, -1)
+        input_x = torch.cat((state, action), dim=1)
+        return self.net_q1(input_x), self.net_q2(input_x)
 
     # def get_q1_q2(self, cond, action):
     #     if isinstance(cond, dict):

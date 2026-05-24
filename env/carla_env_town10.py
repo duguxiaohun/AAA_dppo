@@ -21,43 +21,6 @@ sys.path.append('/home/codon/CARLA/CARLA_0.9.12/PythonAPI/carla/')
 import carla
 from carla import ColorConverter as cc
 # ---- force import CARLA PythonAPI first (avoid name clash with pybullet_envs.agents) ----
-import os, sys
-CARLA_PYAPI = "/home/codon/CARLA/CARLA_0.9.12/PythonAPI/carla"
-sys.path.insert(0, CARLA_PYAPI)                      # 确保优先加载 carla 包
-sys.path.insert(0, os.path.join(CARLA_PYAPI, "agents"))  # 确保优先加载 CARLA 的 agents
-
-# 如果你还需要 carla/dist 的 egg（某些安装需要），可选：
-# sys.path.insert(0, "/home/codon/CARLA/CARLA_0.9.12/PythonAPI/carla/dist/carla-0.9.12-py3.8-linux-x86_64.egg")
-
-# 之后再导入
-from agents.navigation.basic_agent import BasicAgent
-from carla import VehicleLightState as vls
-
-screen_width, screen_height = 640, 360  # long, short
-WIDTH, HEIGHT, PACK = 80, 45, 4
-import pygame
-import pygame.freetype
-
-import weakref
-import logging
-import random
-import collections
-import numpy as np
-import math
-import cv2
-import re
-import sys
-import os
-from collections import deque, defaultdict
-import matplotlib.pyplot as plt
-
-# append sys PATH for CARLA simulator
-sys.path.append('/home/codon/CARLA/CARLA_0.9.12/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg')
-sys.path.append('/home/codon/CARLA/CARLA_0.9.12/PythonAPI/carla/')
-
-import carla
-from carla import ColorConverter as cc
-# ---- force import CARLA PythonAPI first (avoid name clash with pybullet_envs.agents) ----
 CARLA_PYAPI = "/home/codon/CARLA/CARLA_0.9.12/PythonAPI/carla"
 sys.path.insert(0, CARLA_PYAPI)                      # 确保优先加载 carla 包
 sys.path.insert(0, os.path.join(CARLA_PYAPI, "agents"))  # 确保优先加载 CARLA 的 agents
@@ -75,7 +38,7 @@ class InterSection(gym.Env):
     def __init__(self, enabled_obs_number=8, vehicle_type='single', use_checker=False,
                  control_interval=1, advanced_info=False,
                  surrounding_record=False, frame=10, port=2000,
-                 seed=0):
+                 seed=0, render=False):
 
         self.image_size = WIDTH * HEIGHT
         self.action_size = 1
@@ -134,7 +97,7 @@ class InterSection(gym.Env):
         ## initialize the pygame settings
 
         settings = self.world.get_settings()
-        settings.no_rendering_mode = False
+        settings.no_rendering_mode = not (os.environ.get('CARLA_VISUALIZE', 'False').lower() == 'true')
         self.world.apply_settings(settings)
 
         self.seed = seed
@@ -169,6 +132,7 @@ class InterSection(gym.Env):
         self.ppp1 = None
         self.y_aver = None
         self.dist_travelled = 0
+        self.prev_dist_to_goal = None
 
         ## reset the human intervention state
         self.intervention = False
@@ -203,7 +167,9 @@ class InterSection(gym.Env):
 
         spawn_point_ego = self.world.get_map().get_spawn_points()[0]
 
-        spawn_point_ego.location.x =  -1.4325
+        rangee = 5
+        spawn_point_ego.location.x =  - rangee * random.random()
+        # spawn_point_ego.location.x =  -1.4325
 
 
         # spawn_point_ego.location.x = -0
@@ -272,7 +238,6 @@ class InterSection(gym.Env):
 
         random_vehicle_indexes = np.random.choice(len(lat_list), len(lat_list), replace=False)
         random_vehicle_indexes = sorted(random_vehicle_indexes)
-        
         for i in random_vehicle_indexes:
             trans = carla.Transform()
             trans.location.x, trans.location.y, trans.location.z = lat_list[i], long_list[i], 0.1
@@ -352,6 +317,8 @@ class InterSection(gym.Env):
         script_dir = os.path.dirname(__file__)
         self.wp = np.load(script_dir + '/map/wp.npy')
         self.wp2 = np.load(script_dir + '/map/wp2.npy')
+
+        self.visualize_waypoints()
 
         state = self.get_observation_scene()
         self.agent.ignore_vehicles(active=True)
@@ -584,15 +551,26 @@ class InterSection(gym.Env):
         return self_trajs
 
     def spect_cam(self, vehicle):
+        """
+        Chase camera: placed behind and above the vehicle, yaw tracks vehicle heading.
+        Replaces the old fixed-axis offset + pitch=-90 approach.
+        """
         self.spectator = self.world.get_spectator()
-        tr = vehicle.get_transform()
-        tr.location.z += 40
+        veh_t   = vehicle.get_transform()
+        veh_loc = veh_t.location
+        yaw_rad = math.radians(veh_t.rotation.yaw)
 
-        tr.rotation = carla.Rotation(pitch=-90.000000, yaw=-0.289116, roll=0.000000)
-        # tr.location.z += 2
+        back   = 20.0
+        height = 35.0
 
-        # tr.rotation = carla.Rotation(pitch=-90.000000, yaw=-0.289116, roll=0.000000)
-        self.spectator.set_transform(tr)
+        cam_loc = carla.Location(
+            x = veh_loc.x - math.cos(yaw_rad) * back,
+            y = veh_loc.y - math.sin(yaw_rad) * back,
+            z = veh_loc.z + height,
+        )
+        cam_pitch = -math.degrees(math.atan2(height, back))   # ≈ -60°
+        cam_rot   = carla.Rotation(pitch=cam_pitch, yaw=veh_t.rotation.yaw, roll=0.0)
+        self.spectator.set_transform(carla.Transform(cam_loc, cam_rot))
 
     def get_observation_scene(self):
         y_ego = self.ego_vehicle.get_location().y
@@ -645,6 +623,7 @@ class InterSection(gym.Env):
         return (speed * 3.6, lane)
 
     def step(self, action):
+
         # for point in self.wp2:
         #     x, y = point[0], point[1]
         #     z = self.world.get_map().get_waypoint(carla.Location(x, y, 0)).transform.location.z
@@ -766,15 +745,26 @@ class InterSection(gym.Env):
         self.finish = (y_ego > -40) and (x_ego > -54 and x_ego < -48.5)
         self.max_time = self.count > 300
 
-        if self.collision:
-            print('Collision!')
+        # if self.collision:
+        #     print('Collision!')
 
         success = 2 if self.finish else 0
-        coll = -1 if self.collision else 0
+        # Increased collision/off-route penalty (was -1, now -2) to make failure cost
+        # more comparable to success reward (+2), preventing the agent from ignoring
+        # collisions when it already has a high success baseline.
+        coll = -2 if self.collision else 0
         coll = coll - 1 if self.off_route else coll
         coll = coll - 1 if self.max_time else coll
 
-
+        # Dense progress reward: reward for closing the distance to the goal center.
+        # Goal zone: x ∈ [-54, -48.5], y > -40 → center (-51.25, -40).
+        _GOAL_X, _GOAL_Y = -51.25, -40.0
+        curr_dist = math.sqrt((x_ego - _GOAL_X) ** 2 + (y_ego - _GOAL_Y) ** 2)
+        if self.prev_dist_to_goal is None:
+            progress_reward = 0.0
+        else:
+            progress_reward = (self.prev_dist_to_goal - curr_dist) * 0.1
+        self.prev_dist_to_goal = curr_dist
 
         self.record_one_step_total()
 
@@ -793,7 +783,7 @@ class InterSection(gym.Env):
 
 
         speed_reward = velocity_ego
-        reward = success + coll + 0.1 * speed_reward
+        reward = success + coll + 0.1 * speed_reward + progress_reward
 
 
         info = (
@@ -865,6 +855,27 @@ class InterSection(gym.Env):
 
     def _next_sensor(self):
         self.camera_index += 1
+
+    def visualize_waypoints(self, life_time=60.0):
+        """Draw wp (green) and wp2 (red) in the CARLA world for debugging."""
+        for point in self.wp:
+            x, y = float(point[0]), float(point[1])
+            z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z + 0.1
+            self.world.debug.draw_point(
+                carla.Location(x=x, y=y, z=z),
+                size=0.08,
+                color=carla.Color(0, 255, 0),   # green → lane 1
+                life_time=life_time,
+            )
+        for point in self.wp2:
+            x, y = float(point[0]), float(point[1])
+            z = self.map.get_waypoint(carla.Location(x, y, 0)).transform.location.z + 0.1
+            self.world.debug.draw_point(
+                carla.Location(x=x, y=y, z=z),
+                size=0.08,
+                color=carla.Color(255, 0, 0),   # red → lane 2
+                life_time=life_time,
+            )
 
     def _next_weather(self, reverse=False):
         self._weather_index += -1 if reverse else 1

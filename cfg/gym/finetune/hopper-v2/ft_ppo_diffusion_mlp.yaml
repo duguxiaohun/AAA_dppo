@@ -12,11 +12,13 @@ normalization_path: ${hydra:runtime.cwd}/logs/gym/${env_name}/normalization.npz
 
 seed: 42
 device: cuda:0
+# false=不渲染窗口（训练默认）；true=显示CARLA窗口
+visualize: false
 # 环境切换接口：默认 Town05 十字路口左转场景
 # 也可命令行覆盖：python script/run.py carla_env_interface=CarlaTown05Cross-v0
 carla_env_interface: CarlaTown05Cross-v0
 # carla_env_interface: CarlaTown10Cross-v0
-# carla_env_interface: carlaenv10-v0
+
 
 env_name: ${carla_env_interface}
 obs_dim: 128
@@ -48,9 +50,12 @@ wandb:
 eval:
   # 评估脚本会将 cfg._target_ 强制切到该 Agent，确保只评估不训练
   agent_target: agent.eval_ppo_diffusion_agent.EvalPPODiffusionAgent
-  # 批量 checkpoint 根目录（递归查找）
-  checkpoint_root: ${hydra:runtime.cwd}/logs/gym-finetune/CarlaTown05Cross-v0_ppo_diffusion_mlp_ta1_td20_tdf20
+  # 批量 checkpoint 根目录（递归查找所有子run）
+  checkpoint_root: ${hydra:runtime.cwd}/logs/gym-finetune/${name}
+  # 单次评估：直接指定某个 checkpoint 目录（设为 "" 则退回到 checkpoint_root 扫描模式）
+  checkpoint_dir: ""
   checkpoint_pattern: state_*.pt
+  checkpoint_step: -1
   max_checkpoints: -1
 
   # 评估规模
@@ -64,11 +69,11 @@ eval:
   carla_offscreen: True
 
   # 输出目录（会自动创建子目录：${env_name}_eval500_时间戳）
-  results_root: ${hydra:runtime.cwd}/logs/gym-finetune/CarlaTown05_eval_ppo_diffusion_mlp
+  results_root: ${hydra:runtime.cwd}/logs/gym-eval/${env_name}_eval_ppo_diffusion_mlp
 
   # wandb 命名（eval.py 会覆盖全局 wandb 配置）
   wandb_project: gym-${env_name}-eval
-  wandb_run_prefix: CarlaTown05_eval500
+  wandb_run_prefix: ${env_name}_eval500
 
 train:
   n_train_itr: 2500

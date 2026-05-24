@@ -421,6 +421,14 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         map_state=next_obs['neighbor_waypoints']
                     )
                 critic_loss = self.model.update_critic(prev_obs2, action_venv, reward_venv, next_obs2, done_venvv)
+                # Update distributional critic immediately here (separate from PPO loop).
+                # critic_loss is a one-time computation graph; doing backward inside the
+                # PPO batch loop would destroy the graph on the first call and silently
+                # skip gradient updates for all subsequent batches.
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                self.critic_optimizer.step()
+                critic_loss_val = critic_loss.item()
 
 
 
@@ -663,11 +671,10 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         )
                         loss = (
                             pg_loss
-                            + entropy_loss * self.ent_coef # 0
-                            + v_loss * self.vf_coef  # 0.5
-                            + bc_loss * self.bc_loss_coeff  # 两个策略相似性 # 0
-                            + critic_loss * self.vf_coef
-                            + bcloss * self.bc_loss_coeff  # 去噪loss
+                            + entropy_loss * self.ent_coef
+                            + v_loss * self.vf_coef
+                            + bc_loss * self.bc_loss_coeff
+                            + bcloss * self.bc_loss_coeff
                         )
 
                         clipfracs += [clipfrac]
@@ -795,7 +802,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                                 "bc loss": bc_loss,
                                 "new_bc_loss": bcloss,
                                 "dynamic_loss": dynamic_loss,
-                                "new_critic_loss": critic_loss,
+                                "new_critic_loss": critic_loss_val,
                                 "eta": eta,
                                 "approx kl": approx_kl,
                                 "ratio": ratio,

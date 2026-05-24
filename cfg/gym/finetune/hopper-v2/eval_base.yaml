@@ -1,0 +1,19 @@
+defaults:
+  - ft_ppo_diffusion_mlp
+  - _self_
+
+# Redirect ALL hydra and agent outputs away from the training directory.
+# hydra.run.dir is derived from logdir, so overriding logdir here is enough.
+logdir: ${hydra:runtime.cwd}/logs/gym-eval/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+
+_target_: agent.eval_ppo_diffusion_agent.EvalPPODiffusionAgent
+
+# true=显示CARLA窗口（评估默认）；命令行覆盖：visualize=false
+visualize: true
+
+wandb:
+  project: gym-${env_name}-eval
+  run: ${now:%H-%M-%S}_eval_${name}
+
+eval:
+  results_root: ${hydra:runtime.cwd}/logs/gym-eval/${env_name}_results

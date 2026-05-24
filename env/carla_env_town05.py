@@ -107,7 +107,7 @@ class InterSection(gym.Env):
         self._weather_index = 8
 
         settings = self.world.get_settings()
-        settings.no_rendering_mode = True
+        settings.no_rendering_mode = not (os.environ.get('CARLA_VISUALIZE', 'False').lower() == 'true')
         self.world.apply_settings(settings)
 
         self.seed = seed
@@ -140,6 +140,7 @@ class InterSection(gym.Env):
         self.ppp1 = None
         self.y_aver = None
         self.dist_travelled = 0
+        self.prev_dist_to_goal = None
 
         self.intervention = False
         self.risk = None
@@ -324,7 +325,7 @@ class InterSection(gym.Env):
         self.wp_idx  = 0
         self.wp2_idx = 0
 
-        self.visualize_waypoints()
+        # self.visualize_waypoints()
 
         self.spect_cam_follow()
 
@@ -677,12 +678,23 @@ class InterSection(gym.Env):
             np.linalg.norm(pos - np.array([_END1_X, _END1_Y])) < 15.0 or
             np.linalg.norm(pos - np.array([_END2_X, _END2_Y])) < 15.0
         )
-        self.max_time = self.count > 200
+        self.max_time = self.count > 250
 
         success = 2 if self.finish else 0
-        coll = -1 if self.collision else 0
+        coll = -2 if self.collision else 0
         coll = coll - 1 if self.off_route else coll
         coll = coll - 1 if self.max_time else coll
+
+        # Dense progress reward toward the nearer goal endpoint.
+        pos = np.array([x_ego, y_ego])
+        d1 = math.sqrt((x_ego - _END1_X) ** 2 + (y_ego - _END1_Y) ** 2)
+        d2 = math.sqrt((x_ego - _END2_X) ** 2 + (y_ego - _END2_Y) ** 2)
+        curr_dist = min(d1, d2)
+        if self.prev_dist_to_goal is None:
+            progress_reward = 0.0
+        else:
+            progress_reward = (self.prev_dist_to_goal - curr_dist) * 0.1
+        self.prev_dist_to_goal = curr_dist
 
         self.record_one_step_total()
 
@@ -701,7 +713,7 @@ class InterSection(gym.Env):
 
 
         speed_reward = velocity_ego
-        reward = success + coll + 0.2 * speed_reward
+        reward = success + coll + 0.2 * speed_reward + progress_reward
 
         info = (
             self.finish, self.collision, self.off_route, self.max_time,

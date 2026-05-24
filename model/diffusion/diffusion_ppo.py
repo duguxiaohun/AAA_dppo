@@ -118,7 +118,7 @@ class PPODiffusion(VPGDiffusion):
         oldlogprobs = oldlogprobs.sum(dim=-1).mean(dim=-1).view(-1)
         # B
 
-        bc_loss = 0
+        bc_loss = torch.zeros(1, device=self.device).squeeze()
         if use_bc_loss:
             # See Eqn. 2 of https://arxiv.org/pdf/2403.03949.pdf
             # Give a reward for maximizing probability of teacher policy's action with current policy.
@@ -256,9 +256,14 @@ class PPODiffusion(VPGDiffusion):
             exp_Q2 = (target_Q2_projected * z).sum(dim=1, keepdim=True)  # (B, 1)
             target_Q = torch.where(exp_Q1 < exp_Q2, target_Q1_projected, target_Q2_projected)
 
-        current_Q1, current_Q2 = self.critic.get_q1_q2(obs, action)
-        critic_loss = -torch.sum(target_Q * torch.log(current_Q1 + 1e-8), dim=1).mean() \
-                      - torch.sum(target_Q * torch.log(current_Q2 + 1e-8), dim=1).mean()
+        # Use raw logits + log_softmax for numerically stable cross-entropy.
+        # log(softmax(q) + 1e-8) would saturate gradients for near-zero atoms;
+        # F.log_softmax avoids that.
+        logits_Q1, logits_Q2 = self.critic.get_q1_q2_logits(obs, action)
+        log_prob1 = F.log_softmax(logits_Q1, dim=1)
+        log_prob2 = F.log_softmax(logits_Q2, dim=1)
+        critic_loss = -torch.sum(target_Q * log_prob1, dim=1).mean() \
+                      - torch.sum(target_Q * log_prob2, dim=1).mean()
 
         return critic_loss
         # return critic_loss.item()
@@ -379,7 +384,7 @@ class PPODiffusion(VPGDiffusion):
 
 
 
-        bc_loss = 0
+        bc_loss = torch.zeros(1, device=self.device).squeeze()
         if use_bc_loss:
             # See Eqn. 2 of https://arxiv.org/pdf/2403.03949.pdf
             # Give a reward for maximizing probability of teacher policy's action with current policy.

@@ -16,6 +16,7 @@ device: cuda:0
 # 也可命令行覆盖：python script/run.py carla_env_interface=CarlaTown05Cross-v0
 carla_env_interface: CarlaTown05Cross-v0
 # carla_env_interface: CarlaTown10Cross-v0
+# carla_env_interface: carlaenv10-v0
 
 env_name: ${carla_env_interface}
 obs_dim: 128
@@ -43,6 +44,31 @@ wandb:
   entity: 1150900229-
   project: gym-${env_name}-finetune1
   run: ${now:%H-%M-%S}_${name}
+
+eval:
+  # 评估脚本会将 cfg._target_ 强制切到该 Agent，确保只评估不训练
+  agent_target: agent.eval_ppo_diffusion_agent.EvalPPODiffusionAgent
+  # 批量 checkpoint 根目录（递归查找）
+  checkpoint_root: ${hydra:runtime.cwd}/logs/gym-finetune/CarlaTown05Cross-v0_ppo_diffusion_mlp_ta1_td20_tdf20
+  checkpoint_pattern: state_*.pt
+  max_checkpoints: -1
+
+  # 评估规模
+  episodes_per_checkpoint: 500
+  max_episode_steps: 1000
+  use_target_action_refine: True
+
+  # CARLA 启动参数
+  carla_port: 2000
+  carla_quality: Epic
+  carla_offscreen: True
+
+  # 输出目录（会自动创建子目录：${env_name}_eval500_时间戳）
+  results_root: ${hydra:runtime.cwd}/logs/gym-finetune/CarlaTown05_eval_ppo_diffusion_mlp
+
+  # wandb 命名（eval.py 会覆盖全局 wandb 配置）
+  wandb_project: gym-${env_name}-eval
+  wandb_run_prefix: CarlaTown05_eval500
 
 train:
   n_train_itr: 2500

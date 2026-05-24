@@ -980,8 +980,8 @@ class Represent_Learner(nn.Module):
 
     def forward(self, prev_obs, actions, next_obs, mask=None, test=False):
         lambda_cosine = 1.0
-        lambda_infonce = 0.1   # InfoNCE量级~10x cosine，0.1使两者贡献相近
-        lambda_cycle = 0.5     # cycle loss与cosine同量级，作为辅助时间一致性正则
+        lambda_infonce = 0.2   # InfoNCE量级~10x cosine，0.1使两者贡献相近
+        lambda_cycle = 0.4     # cycle loss与cosine同量级，作为辅助时间一致性正则
 
 
         states = prev_obs['neighbor_trajs']

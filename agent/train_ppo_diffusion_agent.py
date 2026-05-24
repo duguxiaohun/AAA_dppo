@@ -811,7 +811,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         qb_reward = qb_reward + self.intrinsic.compute_reward(qb_obs_enc, qb_next_enc)
                     self.critic_q_optimizer.zero_grad()
                     _closs = self.model.update_critic(qb_obs_enc, qb_action, qb_reward, qb_next_enc, qb_done)
-                    # _closs.backward()
+                    _closs.backward()
                     if self.max_grad_norm is not None:
                         torch.nn.utils.clip_grad_norm_(
                             list(self.model.critic.net_q1.parameters()) +

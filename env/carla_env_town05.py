@@ -677,7 +677,7 @@ class InterSection(gym.Env):
             np.linalg.norm(pos - np.array([_END1_X, _END1_Y])) < 15.0 or
             np.linalg.norm(pos - np.array([_END2_X, _END2_Y])) < 15.0
         )
-        self.max_time = self.count > 300
+        self.max_time = self.count > 200
 
         success = 2 if self.finish else 0
         coll = -1 if self.collision else 0
@@ -701,7 +701,7 @@ class InterSection(gym.Env):
 
 
         speed_reward = velocity_ego
-        reward = success + coll + 0.1 * speed_reward
+        reward = success + coll + 0.2 * speed_reward
 
         info = (
             self.finish, self.collision, self.off_route, self.max_time,

@@ -46,7 +46,8 @@ from configs.init_configs import set_configs, get_argument
 import gym
 
 parser = get_argument()
-args = parser.parse_args()
+# 兼容 Hydra 的 key=value 覆盖参数，避免在导入阶段因未知参数直接退出。
+args, _unknown = parser.parse_known_args()
 
 if torch.cuda.is_available():
     torch.cuda.set_device(args.gpu)

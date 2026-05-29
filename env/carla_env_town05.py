@@ -56,7 +56,7 @@ class InterSection(gym.Env):
     def __init__(self, enabled_obs_number=8, vehicle_type='single', use_checker=False,
                  control_interval=1, advanced_info=False,
                  surrounding_record=False, frame=10, port=2000,
-                 seed=0, render=True):
+                 seed=0, render=True, rangee=5):
 
         self.image_size = WIDTH * HEIGHT
         self.action_size = 1
@@ -69,6 +69,7 @@ class InterSection(gym.Env):
         self.use_checker = use_checker
         self.surrounding_record = surrounding_record
         self.frame = frame
+        self.rangee = rangee
 
         self.ego_vehicle = None
         self.obs_list, self.bp_obs_list, self.spawn_point_obs_list = [], [], []
@@ -191,8 +192,11 @@ class InterSection(gym.Env):
         bp_ego.set_attribute('color', '0, 0, 0')
         bp_ego.set_attribute('role_name', 'hero')
 
+        # rangee 控制产生点沿直道方向的随机偏移：rangee=5 → y∈[20,25]，rangee=0 → 固定y=25
+        rangee = 5
+
         spawn_point_ego = carla.Transform(
-            carla.Location(x=_SPAWN_X, y=_SPAWN_Y, z=_SPAWN_Z),
+            carla.Location(x=_SPAWN_X, y=_SPAWN_Y - rangee * random.random(), z=_SPAWN_Z),
             carla.Rotation(yaw=_init_yaw),
         )
 

@@ -31,6 +31,9 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
         # Reward horizon --- always set to act_steps for now
         self.reward_horizon = cfg.get("reward_horizon", self.act_steps)
         self.intrinsic = IntrinsicM(self.obs_dim*self.cond_steps, device=self.device)
+        # Number of off-policy Q-critic updates per outer iteration.
+        # Critic should be updated more frequently than actor (off-policy TD vs on-policy PPO).
+        self.critic_q_update_steps = cfg.train.get("critic_q_update_steps", 20)
 
 
         # Eta - between DDIM (=0 for eval) and DDPM (=1 for training)
@@ -374,61 +377,67 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
 
             # Update models
             if not eval_mode:
-                data_list = self.diffusion_buffer.sample_batch(self.batch_size)
-                prev_obs, action_venv, target_action_venv, reward_venv, next_obs, done_venvv = data_list
+                # ── Phase 1: Off-policy Q-critic updates ─────────────────────────────
+                # Run critic_q_update_steps times with fresh samples each step.
+                # Each step: encode → intrinsic reward → Q update → soft-update target.
+                # Keeping the critic update loop separate from the PPO actor loop ensures:
+                # (1) the Q-critic gets updated at a proper off-policy frequency,
+                # (2) soft_update is never skipped by PPO's KL early-stop,
+                # (3) no redundant encoder calls (one encode per critic step).
+                for cq_step in range(self.critic_q_update_steps):
+                    data_list = self.diffusion_buffer.sample_batch(self.batch_size)
+                    prev_obs, action_venv, target_action_venv, reward_venv, next_obs, done_venvv = data_list
 
+                    with torch.no_grad():
+                        prev_obs_enc, _ = self.model.encoder(
+                            prev_obs['neighbor_trajs'],
+                            mask=None,
+                            test=prev_obs,
+                            init_state=prev_obs['ego_state'],
+                            map_state=prev_obs['neighbor_waypoints']
+                        )
+                        next_obs_enc, _ = self.model.target_encoder(
+                            next_obs['neighbor_trajs'],
+                            mask=None,
+                            test=next_obs,
+                            init_state=next_obs['ego_state'],
+                            map_state=next_obs['neighbor_waypoints']
+                        )
 
+                    reward_intrinsic = self.intrinsic.compute_reward(prev_obs_enc, next_obs_enc)
+                    reward_aug = reward_venv + reward_intrinsic
 
-
-                with torch.no_grad():
-                    prev_obs1, _ = self.model.encoder(
-                        prev_obs['neighbor_trajs'],
-                        mask=None,
-                        test=prev_obs,
-                        init_state=prev_obs['ego_state'],
-                        map_state=prev_obs['neighbor_waypoints']
+                    critic_loss = self.model.update_critic(
+                        prev_obs_enc, action_venv, reward_aug, next_obs_enc, done_venvv
                     )
-                    next_obs1, _ = self.model.target_encoder(
-                        next_obs['neighbor_trajs'],
-                        mask=None,
-                        test=next_obs,
-                        init_state=next_obs['ego_state'],
-                        map_state=next_obs['neighbor_waypoints']
-                    )
+                    self.critic_optimizer.zero_grad()
+                    critic_loss.backward()
+                    self.critic_optimizer.step()
 
+                    # Soft-update target network once per Q-critic step.
+                    # Previously this was inside the PPO epoch loop and got skipped
+                    # whenever KL early-stop (flag_break) triggered.
+                    soft_update(self.model.critic_target, self.model.critic, self.tau)
+                    self.rep_func._update_params(self.tau)
 
-
-
-                reward_intrinsic = self.intrinsic.compute_reward(prev_obs1, next_obs1)
-                reward_venv = reward_venv + reward_intrinsic
-                mean_action, new_action = self.model.update_target_action(prev_obs, action_venv)
-                self.diffusion_buffer.update_target_action(new_action)
-                bcloss = self.model.update_actor(prev_obs, new_action)
-                with torch.no_grad():
-
-                    prev_obs2, _ = self.model.encoder(
-                        prev_obs['neighbor_trajs'],
-                        mask=None,
-                        test=prev_obs,
-                        init_state=prev_obs['ego_state'],
-                        map_state=prev_obs['neighbor_waypoints']
-                    )
-                    next_obs2, _ = self.model.target_encoder(
-                        next_obs['neighbor_trajs'],
-                        mask=None,
-                        test=next_obs,
-                        init_state=next_obs['ego_state'],
-                        map_state=next_obs['neighbor_waypoints']
-                    )
-                critic_loss = self.model.update_critic(prev_obs2, action_venv, reward_venv, next_obs2, done_venvv)
-                # Update distributional critic immediately here (separate from PPO loop).
-                # critic_loss is a one-time computation graph; doing backward inside the
-                # PPO batch loop would destroy the graph on the first call and silently
-                # skip gradient updates for all subsequent batches.
-                self.critic_optimizer.zero_grad()
-                critic_loss.backward()
-                self.critic_optimizer.step()
                 critic_loss_val = critic_loss.item()
+
+                # Update intrinsic model once (using the last critic step's encodings).
+                if self.intrinsic.type == 'rnd':
+                    dynamic_loss, dynamic_grad_norm = self.intrinsic.update(prev_obs_enc)
+                elif self.intrinsic.type == 'noveld':
+                    dynamic_loss, dynamic_grad_norm = self.intrinsic.update(
+                        torch.cat([prev_obs_enc, next_obs_enc])
+                    )
+                else:
+                    raise NotImplementedError
+
+                # ── Phase 2: Off-policy actor BC update (once per outer iteration) ──
+                data_bc = self.diffusion_buffer.sample_batch(self.batch_size)
+                prev_obs_bc, action_bc, _, _, _, _ = data_bc
+                mean_action, new_action = self.model.update_target_action(prev_obs_bc, action_bc)
+                self.diffusion_buffer.update_target_action(new_action)
+                bcloss = self.model.update_actor(prev_obs_bc, new_action)
 
 
 
@@ -703,32 +712,9 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         if self.target_kl is not None and approx_kl > self.target_kl:
                             flag_break = True
                             break
-                with torch.no_grad():
+                    if flag_break:
+                        break
 
-                    prev_obs3, _ = self.model.encoder(
-                        prev_obs['neighbor_trajs'],
-                        mask=None,
-                        test=prev_obs,
-                        init_state=prev_obs['ego_state'],
-                        map_state=prev_obs['neighbor_waypoints']
-                    )
-                    next_obs3, _ = self.model.target_encoder(
-                        next_obs['neighbor_trajs'],
-                        mask=None,
-                        test=next_obs,
-                        init_state=next_obs['ego_state'],
-                        map_state=next_obs['neighbor_waypoints']
-                    )
-                if self.intrinsic.type == 'rnd':
-                    dynamic_loss, dynamic_grad_norm = self.intrinsic.update(prev_obs3)
-                elif self.intrinsic.type == 'noveld':
-                    dynamic_loss, dynamic_grad_norm = self.intrinsic.update(torch.cat([prev_obs3, next_obs3]))
-                else:
-                    raise NotImplementedError
-                if flag_break:
-                    break
-                soft_update(self.model.critic_target, self.model.critic, self.tau)
-                self.rep_func._update_params(self.tau)
                 # Explained variation of future rewards using value function
                 y_pred, y_true = values_k.cpu().numpy(), returns_k.cpu().numpy()
                 var_y = np.var(y_true)

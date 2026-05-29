@@ -48,11 +48,21 @@ import gym
 
 # DrQ is combined in SAC codes
 def kill_carla():
-    """杀死CARLA进程"""
-    for process in psutil.process_iter(['name']):
-        if 'CarlaUE4' in process.info['name']:
-            print("正在杀死CARLA进程...")
-            process.kill()
+    """杀死CARLA进程和残留的训练进程"""
+    current_pid = os.getpid()
+    for process in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if 'CarlaUE4' in process.info['name']:
+                print("正在杀死CARLA进程...")
+                process.kill()
+            elif (process.info['pid'] != current_pid
+                  and process.info['cmdline']
+                  and 'run.py' in ' '.join(process.info['cmdline'])
+                  and 'python' in process.info['name']):
+                print(f"正在杀死残留训练进程 (pid={process.info['pid']})...")
+                process.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
 
 
 def start_carla(port, visualize=False):

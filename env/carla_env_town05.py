@@ -73,7 +73,7 @@ class InterSection(gym.Env):
 
         self.ego_vehicle = None
         self.obs_list, self.bp_obs_list, self.spawn_point_obs_list = [], [], []
-        self.maximum_enabled_obs = 6
+        self.maximum_enabled_obs = 8
         self.enabled_obs = min(enabled_obs_number, self.maximum_enabled_obs)
         self.add_speed = 0
 
@@ -193,7 +193,7 @@ class InterSection(gym.Env):
         bp_ego.set_attribute('role_name', 'hero')
 
         # rangee 控制产生点沿直道方向的随机偏移：rangee=5 → y∈[20,25]，rangee=0 → 固定y=25
-        rangee = 5
+        rangee = 0
 
         spawn_point_ego = carla.Transform(
             carla.Location(x=_SPAWN_X, y=_SPAWN_Y - rangee * random.random(), z=_SPAWN_Z),
@@ -247,19 +247,22 @@ class InterSection(gym.Env):
         north_port = [              # southbound, approaching from north
             (-50.5, -20.0,  90.0),
             (-50.5, -35.0,  90.0),
+            (-50.5, -50.0,  90.0),
         ]
         east_port = [               # westbound, approaching from east
             (-25.0,  -0.7, 180.0),
             (-30.0,  -4.2, 180.0),
+            (-15.0,  -0.7, 180.0),
         ]
         west_port = [               # eastbound, approaching from west
             (-95.0,   3.5,   0.0),
             (-100.0,  3.5,   0.0),
+            (-110.0,  3.5,   0.0),
         ]
 
         spawn_points = []
         for port in [north_port, east_port, west_port]:
-            n = random.randint(1, 2)
+            n = random.randint(1, 3)
             chosen = random.sample(port, n)
             for sx, sy, syaw in chosen:
                 # Use constructor to avoid carla.Location C++ temp-object bug
@@ -267,6 +270,8 @@ class InterSection(gym.Env):
                     carla.Location(x=sx, y=sy, z=0.1),
                     carla.Rotation(yaw=syaw),
                 ))
+        random.shuffle(spawn_points)
+        spawn_points = spawn_points[:8]
 
         blueprints = self.world.get_blueprint_library().filter('vehicle.*')
         blueprints = [x for x in blueprints if (

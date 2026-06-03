@@ -105,14 +105,15 @@ print(f"Route1: raw={len(raw1)}  smoothed={len(wp1)} pts")
 print(f"Route2: offset from Route1, lane_width={lane_width:.1f} m, {len(wp2)} pts")
 
 # ── save ──────────────────────────────────────────────────────────────────────
-map_dir = os.path.join(os.path.dirname(__file__), '..', 'env', 'map')
+map_dir = os.path.join(os.path.dirname(__file__), '..', 'env', 'map', 'town05')
 os.makedirs(map_dir, exist_ok=True)
-np.save(os.path.join(map_dir, 'route1.npy'), wp1)
-np.save(os.path.join(map_dir, 'route2.npy'), wp2)
+np.save(os.path.join(map_dir, 'town05_left_route1.npy'), wp1)
+np.save(os.path.join(map_dir, 'town05_left_route2.npy'), wp2)
 
 # ── plot ──────────────────────────────────────────────────────────────────────
-ref_wp  = np.load(os.path.join(map_dir, 'wp.npy'))
-ref_wp2 = np.load(os.path.join(map_dir, 'wp2.npy'))
+ref_map_dir = os.path.join(os.path.dirname(__file__), '..', 'env', 'map', 'town10')
+ref_wp  = np.load(os.path.join(ref_map_dir, 'town10_cross_route1.npy'))
+ref_wp2 = np.load(os.path.join(ref_map_dir, 'town10_cross_route2.npy'))
 
 fig, axes = plt.subplots(1, 3, figsize=(22, 8))
 

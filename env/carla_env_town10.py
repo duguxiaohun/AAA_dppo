@@ -315,8 +315,8 @@ class InterSection(gym.Env):
         self.reset_traj_dataset()
         # interpolated waypoints for this scenario map, otherwise perform unrealistic lane-change
         script_dir = os.path.dirname(__file__)
-        self.wp = np.load(script_dir + '/map/wp.npy')
-        self.wp2 = np.load(script_dir + '/map/wp2.npy')
+        self.wp = np.load(script_dir + '/map/town10/town10_cross_route1.npy')
+        self.wp2 = np.load(script_dir + '/map/town10/town10_cross_route2.npy')
 
         self.visualize_waypoints()
 

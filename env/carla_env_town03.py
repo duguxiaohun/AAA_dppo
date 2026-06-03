@@ -240,7 +240,7 @@ class InterSection(gym.Env):
         self.command_interval = round(self.frame / self.interval)
         self.list_action = []
 
-        # ---- Surrounding vehicles (3 ports, 1-3 each, max 8 total) ----
+        # ---- Surrounding vehicles (4 ports, 2-3 each, max 8 total) ----
         self.obs_list = []
         self.obs_velo_list = []
         self.obs_agent_list = []
@@ -273,11 +273,11 @@ class InterSection(gym.Env):
             (-98.0,  -140.0, 180.0),
         ]
 
-        spawn_points = []
-        for label, port in zip(['north', 'east', 'west', 'west_west'],
-                               [north_port, east_port, west_port, west_west_port]):
-            n = random.randint(1, 2)
+        spawn_points_by_port = []
+        for port in [north_port, east_port, west_port, west_west_port]:
+            n = random.randint(2, 3)
             chosen = random.sample(port, n)
+            port_spawn_points = []
             for sx, sy, syaw in chosen:
                 wp = self.map.get_waypoint(
                     carla.Location(x=sx, y=sy, z=0),
@@ -286,12 +286,24 @@ class InterSection(gym.Env):
                 if wp is None:
                     continue
                 loc = wp.transform.location
-                spawn_points.append(carla.Transform(
+                port_spawn_points.append(carla.Transform(
                     carla.Location(x=loc.x, y=loc.y, z=loc.z + 0.3),
                     carla.Rotation(yaw=syaw),
                 ))
+            spawn_points_by_port.append(port_spawn_points)
+
+        while sum(len(port) for port in spawn_points_by_port) > 8:
+            removable_ports = [port for port in spawn_points_by_port if len(port) > 2]
+            if not removable_ports:
+                break
+            selected_port = random.choice(removable_ports)
+            selected_port.pop(random.randrange(len(selected_port)))
+
+        spawn_points = []
+        for port_spawn_points in spawn_points_by_port:
+            spawn_points.extend(port_spawn_points)
         random.shuffle(spawn_points)
-        spawn_points = spawn_points[:5]
+        spawn_points = spawn_points[:8]
 
         blueprints = self.world.get_blueprint_library().filter('vehicle.*')
         blueprints = [x for x in blueprints if (

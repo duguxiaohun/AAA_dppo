@@ -125,6 +125,7 @@ def make_async(
             obs_dim=obs_dim,
             action_dim=action_dim,
             shape_meta=shape_meta,
+            **kwargs,
         )
         return _SingleEnvAdapter(env)
 
@@ -166,9 +167,8 @@ def make_async(
             except Exception:
                 pass
         else:
-            # 普通 Gym / D4RL / 你的自定义（如 CARLA）——不要传无效 kwargs
-            # 特别注意：一些环境（例如 CARLA 包装）不接受 render kwarg
-            env = gym.make(id)
+            # 普通 Gym / D4RL / 你的自定义（如 CARLA）
+            env = gym.make(id, **kwargs)
 
         # 加 wrappers（如果配置了）
         if wrappers is not None:
@@ -244,6 +244,7 @@ def _make_one_env(
     obs_dim=23,
     action_dim=7,
     shape_meta=None,
+    **kwargs,
 ):
     """只创建一个 gym 环境实例，并按需套 wrappers。"""
     import gym
@@ -281,8 +282,7 @@ def _make_one_env(
         except Exception:
             pass
     else:
-        # 最稳：只传 id，不传 render 等可能不被支持的参数
-        env = gym.make(id)
+        env = gym.make(id, **kwargs)
 
     if wrappers is not None:
         from env.gym_utils.wrapper import wrapper_dict

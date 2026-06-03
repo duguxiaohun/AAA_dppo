@@ -14,10 +14,10 @@ seed: 42
 device: cuda:0
 # false=不渲染窗口（训练默认）；true=显示CARLA窗口
 visualize: false
-# 环境切换接口：默认 Town05 十字路口左转场景
+# 环境切换接口：
 # 也可命令行覆盖：python script/run.py carla_env_interface=CarlaTown05Cross-v0
-carla_env_interface: CarlaTown03Cross-v0
-# carla_env_interface: CarlaTown05Cross-v0
+# carla_env_interface: CarlaTown03Cross-v0
+carla_env_interface: CarlaTown05Cross-v0
 # carla_env_interface: CarlaTown10Cross-v0
 
 

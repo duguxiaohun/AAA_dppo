@@ -56,7 +56,17 @@ class InterSection(gym.Env):
     def __init__(self, enabled_obs_number=8, vehicle_type='single', use_checker=False,
                  control_interval=1, advanced_info=False,
                  surrounding_record=False, frame=10, port=2000,
-                 seed=0, render=True, rangee=5):
+                 seed=0, render=True, rangee=5,
+                 randomize_obs_behavior=True,
+                 obs_aggressiveness_range=(0.0, 1.0),
+                 obs_speed_diff_range=(-50, -20),
+                 obs_highway_speed_diff_range=(47, 67),
+                 obs_distance_range=(8, 12),
+                 obs_max_speed_range=None,
+                 obs_ignore_lights_range=(0, 0),
+                 obs_ignore_signs_range=(0, 0),
+                 obs_ignore_vehicles_range=(0, 0),
+                 obs_auto_lane_change=True):
 
         self.image_size = WIDTH * HEIGHT
         self.action_size = 1
@@ -70,6 +80,17 @@ class InterSection(gym.Env):
         self.surrounding_record = surrounding_record
         self.frame = frame
         self.rangee = rangee
+        self.randomize_obs_behavior = randomize_obs_behavior
+        self.obs_aggressiveness_range = tuple(obs_aggressiveness_range)
+        self.obs_speed_diff_range = tuple(obs_speed_diff_range)
+        self.obs_highway_speed_diff_range = tuple(obs_highway_speed_diff_range)
+        self.obs_distance_range = tuple(obs_distance_range)
+        self.obs_max_speed_range = None if obs_max_speed_range is None else tuple(obs_max_speed_range)
+        self.obs_ignore_lights_range = tuple(obs_ignore_lights_range)
+        self.obs_ignore_signs_range = tuple(obs_ignore_signs_range)
+        self.obs_ignore_vehicles_range = tuple(obs_ignore_vehicles_range)
+        self.obs_auto_lane_change = obs_auto_lane_change
+        self.obs_behavior_dict = {}
 
         self.ego_vehicle = None
         self.obs_list, self.bp_obs_list, self.spawn_point_obs_list = [], [], []
@@ -116,8 +137,68 @@ class InterSection(gym.Env):
         self.vehicle_state_dict = {}
 
     # ------------------------------------------------------------------
+    def _sample_uniform(self, value_range):
+        low, high = value_range
+        return random.uniform(float(low), float(high))
+
+    def _sample_int(self, value_range):
+        low, high = value_range
+        return random.randint(int(low), int(high))
+
+    def _speed_diff_from_max_speed(self, vehicle, max_speed_kmh):
+        speed_limit = max(vehicle.get_speed_limit(), 1.0)
+        return 100.0 * (speed_limit - max_speed_kmh) / speed_limit
+
+    def _sample_obs_behavior(self, vehicle, highway=False):
+        if not self.randomize_obs_behavior:
+            speed_range = self.obs_highway_speed_diff_range if highway else self.obs_speed_diff_range
+            return {
+                'aggressiveness': 0.0,
+                'speed_diff': self._sample_int(speed_range),
+                'distance': self._sample_int(self.obs_distance_range),
+                'ignore_lights': self._sample_int(self.obs_ignore_lights_range),
+                'ignore_signs': self._sample_int(self.obs_ignore_signs_range),
+                'ignore_vehicles': self._sample_int(self.obs_ignore_vehicles_range),
+            }
+
+        aggressiveness = self._sample_uniform(self.obs_aggressiveness_range)
+        if self.obs_max_speed_range is not None:
+            max_speed_kmh = self._sample_uniform(self.obs_max_speed_range)
+            speed_diff = self._speed_diff_from_max_speed(vehicle, max_speed_kmh)
+        else:
+            speed_range = self.obs_highway_speed_diff_range if highway else self.obs_speed_diff_range
+            low, high = speed_range
+            speed_diff = float(high) + aggressiveness * (float(low) - float(high))
+
+        max_dist, min_dist = max(self.obs_distance_range), min(self.obs_distance_range)
+        distance = max_dist + aggressiveness * (min_dist - max_dist)
+        ignore_lights = self._sample_uniform(self.obs_ignore_lights_range)
+        ignore_signs = self._sample_uniform(self.obs_ignore_signs_range)
+        ignore_vehicles = self._sample_uniform(self.obs_ignore_vehicles_range)
+        return {
+            'aggressiveness': aggressiveness,
+            'speed_diff': speed_diff,
+            'distance': distance,
+            'ignore_lights': ignore_lights,
+            'ignore_signs': ignore_signs,
+            'ignore_vehicles': ignore_vehicles,
+        }
+
+    def _apply_obs_behavior(self, vehicle, highway=False):
+        behavior = self._sample_obs_behavior(vehicle, highway=highway)
+        self.traffic_manager.auto_lane_change(vehicle, self.obs_auto_lane_change)
+        self.traffic_manager.vehicle_percentage_speed_difference(vehicle, behavior['speed_diff'])
+        self.traffic_manager.distance_to_leading_vehicle(vehicle, behavior['distance'])
+        self.traffic_manager.ignore_lights_percentage(vehicle, behavior['ignore_lights'])
+        self.traffic_manager.ignore_signs_percentage(vehicle, behavior['ignore_signs'])
+        self.traffic_manager.ignore_vehicles_percentage(vehicle, behavior['ignore_vehicles'])
+        self.obs_behavior_dict[vehicle.id] = behavior
+        return behavior
+
+    # ------------------------------------------------------------------
     def reset(self):
         self.vehicle_state_dict = {}
+        self.obs_behavior_dict = {}
         self.stop_once = False
         self.stop_twice = False
         self.random = random.random()
@@ -308,9 +389,7 @@ class InterSection(gym.Env):
 
         iii = 0
         for v in self.obs_actors:
-            self.traffic_manager.auto_lane_change(v, True)
-            self.traffic_manager.vehicle_percentage_speed_difference(v, np.random.randint(-50, -20))
-            self.traffic_manager.distance_to_leading_vehicle(v, np.random.randint(8, 12))
+            self._apply_obs_behavior(v)
             iii += 1
 
         self.speed_limit_obs_flags = np.zeros(iii)
@@ -662,8 +741,7 @@ class InterSection(gym.Env):
         v_index = 0
         for v in self.obs_actors:
             if v.get_speed_limit() > 80 and self.speed_limit_obs_flags[v_index] == 0:
-                self.traffic_manager.vehicle_percentage_speed_difference(
-                    v, np.random.randint(47, 67))
+                self._apply_obs_behavior(v, highway=True)
                 self.speed_limit_obs_flags[int(v_index)] = 1
             v_index += 1
 

@@ -16,7 +16,8 @@ device: cuda:0
 visualize: true
 # 环境切换接口：默认 Town05 十字路口左转场景
 # 也可命令行覆盖：python script/run.py carla_env_interface=CarlaTown05Cross-v0
-carla_env_interface: CarlaTown05Cross-v0
+carla_env_interface: CarlaTown03Cross-v0
+# carla_env_interface: CarlaTown05Cross-v0
 # carla_env_interface: CarlaTown10Cross-v0
 
 
@@ -120,6 +121,10 @@ model:
   clip_ploss_coef: 0.01
   clip_ploss_coef_base: 0.1
   clip_ploss_coef_rate: 3
+  # 值域硬限制：防 ratio/pg_loss 爆炸（step34 崩溃）。ratio 钳在 [1/5,5]，
+  # 负优势支再加 Dual-Clip 上限 c=3。设 null 关闭。
+  ratio_clip_max: 5.0
+  clip_ploss_dual: 3.0
   randn_clip_value: 3
   min_sampling_denoising_std: 0.1
   min_logprob_denoising_std: 0.1

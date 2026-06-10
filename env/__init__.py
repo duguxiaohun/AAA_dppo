@@ -11,3 +11,9 @@ gym.register(
     id="CarlaTown05Cross-v0",
     entry_point="env.carla_env_town05:InterSection",
 )
+
+# Town03 十字路口直行场景
+gym.register(
+    id="CarlaTown03Cross-v0",
+    entry_point="env.carla_env_town03:InterSection",
+)

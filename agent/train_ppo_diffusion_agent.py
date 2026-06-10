@@ -226,7 +226,10 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                               cond_steps=self.cond_steps,
                               horizon_steps=self.horizon_steps)
         # self.load('/home/codon/github/AAA_dppo/baseline/checkpoint', 540)
-        self.explore_env(self.warm_up)
+        if 'Town03' in self.cfg.carla_env_interface:
+            self.explore_env(self.warm_up)
+        else:
+            self.explore_env(self.warm_up)
         self.itr = 0
 
         while self.itr < self.n_train_itr:
@@ -822,7 +825,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         qb_reward = qb_reward + self.intrinsic.compute_reward(qb_obs_enc, qb_next_enc)
                     self.critic_q_optimizer.zero_grad()
                     _closs = self.model.update_critic(qb_obs_enc, qb_action, qb_reward, qb_next_enc, qb_done)
-                    # _closs.backward()  #11111
+                    _closs.backward()  #11111
                     if self.max_grad_norm is not None:
                         torch.nn.utils.clip_grad_norm_(
                             list(self.model.critic.net_q1.parameters()) +

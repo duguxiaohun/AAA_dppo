@@ -34,12 +34,19 @@ class PPODiffusion(VPGDiffusion):
         clip_advantage_lower_quantile: float = 0,
         clip_advantage_upper_quantile: float = 1,
         norm_adv: bool = True,
+        # 值域硬限制：防止 ratio / pg_loss 爆炸（见 step 34 崩溃）
+        ratio_clip_max: float = 5.0,      # importance ratio 的硬上限；None 关闭
+        clip_ploss_dual: Optional[float] = 3.0,  # Dual-Clip PPO 常数 c>1；None 关闭
         **kwargs,
     ):
         super().__init__(**kwargs)
 
         # Whether to normalize advantages within batch
         self.norm_adv = norm_adv
+
+        # 值域硬限制
+        self.ratio_clip_max = ratio_clip_max
+        self.clip_ploss_dual = clip_ploss_dual
 
         # Clipping value for policy loss
         self.clip_ploss_coef = clip_ploss_coef
@@ -164,6 +171,8 @@ class PPODiffusion(VPGDiffusion):
         # get ratio
         logratio = newlogprobs - oldlogprobs
 
+        # 生 ratio 仅用于 KL / clipfrac 诊断与 early-stop，绝不能被钳，否则
+        # approx_kl 被压低会让 target_kl early-stop 失效。
         ratio = logratio.exp()
 
         # exponentially interpolate between the base and the current clipping value over denoising steps and repeat
@@ -187,14 +196,39 @@ class PPODiffusion(VPGDiffusion):
             approx_kl = ((ratio - 1) - logratio).mean()
             clipfrac = ((ratio - 1.0).abs() > clip_ploss_coef).float().mean().item()
 
+        # ---- 值域硬限制：把进入 pg_loss 的 ratio 钳住 ----
+        # ratio 顶到 logprob clamp 的天花板 exp(2-(-5))≈1100 时，pg_loss 会爆到上千
+        # （step 34: ratio→750, pg_loss→1800 → 策略一步崩）。这里用一个单独的
+        # ratio_pg（不影响上面的 approx_kl 诊断），把它钳在 [1/M, M]。
+        if self.ratio_clip_max is not None:
+            ratio_pg = ratio.clamp(
+                max=self.ratio_clip_max, min=1.0 / self.ratio_clip_max
+            )
+        else:
+            ratio_pg = ratio
+
         # Policy loss with clipping
-        pg_loss1 = -advantages * ratio
+        pg_loss1 = -advantages * ratio_pg
         pg_loss2 = -advantages * torch.clamp(
-            ratio, 1 - clip_ploss_coef, 1 + clip_ploss_coef
+            ratio_pg, 1 - clip_ploss_coef, 1 + clip_ploss_coef
         )
-        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+        pg_loss_per = torch.max(pg_loss1, pg_loss2)
+
+        # ---- Dual-Clip PPO（针对 advantage<0 的爆炸支）----
+        # 标准 PPO 的 max() 在 advantage<0 时会选未裁剪的 -adv*ratio，随 ratio 增大无界。
+        # Dual-Clip 给负优势样本再加一个上限 -c*adv (c>1)，从根上掐断 +1800 那种尖峰。
+        if self.clip_ploss_dual is not None:
+            pg_loss_per = torch.where(
+                advantages < 0,
+                torch.min(pg_loss_per, -self.clip_ploss_dual * advantages),
+                pg_loss_per,
+            )
+        pg_loss = pg_loss_per.mean()
 
         # Value loss optionally with clipping
+        # 值域硬限制：把回归目标 returns 钳到 critic 支撑 [v_min, v_max]，
+        # 防止 explained_variance 转负时 returns 失真导致 v_loss 跟着炸。
+        returns = returns.clamp(min=self.critic.v_min, max=self.critic.v_max)
         newvalues = self.critic.get_v(obs).view(-1)
         if self.clip_vloss_coef is not None:
             v_loss_unclipped = (newvalues - returns) ** 2

@@ -441,17 +441,28 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                         ]
                     )
                 avg_episode_reward = np.mean(episode_reward)
-                # 回合平均奖励
+                std_episode_reward = np.std(episode_reward)
                 avg_best_reward = np.mean(episode_best_reward)
-                success_rate = np.mean(
-                    episode_best_reward >= self.best_reward_threshold_for_success
+                std_best_reward = np.std(episode_best_reward)
+                success_arr = (episode_best_reward >= self.best_reward_threshold_for_success).astype(float)
+                success_rate = np.mean(success_arr)
+                std_success_rate = np.std(success_arr)
+                episode_steps_arr = np.array(
+                    [(end - start) * self.act_steps for _, start, end in episodes_start_end]
                 )
+                avg_episode_steps = np.mean(episode_steps_arr)
+                std_episode_steps = np.std(episode_steps_arr)
             else:
                 episode_reward = np.array([])
                 num_episode_finished = 0
                 avg_episode_reward = 0
+                std_episode_reward = 0
                 avg_best_reward = 0
+                std_best_reward = 0
                 success_rate = 0
+                std_success_rate = 0
+                avg_episode_steps = 0
+                std_episode_steps = 0
                 log.info("[WARNING] No episode completed within the iteration!")
 
             # Update models
@@ -769,7 +780,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                 # 4. Actor BC off-policy 独立 backward
                 self.actor_optimizer.zero_grad()
                 bcloss = self.model.update_actor(prev_obs, new_action)
-                # bcloss.backward()  #11111
+                bcloss.backward()  #11111
                 if self.itr >= self.n_critic_warmup_itr:
                     if self.max_grad_norm is not None:
                         torch.nn.utils.clip_grad_norm_(
@@ -875,12 +886,15 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                     "step": cnt_train_step,
                 }
             )
-            # 计算多窗口成功率
+            # 计算多窗口成功率及标准差
             n_ep = len(success_log)
-            succ_20  = np.mean(success_log[-20:])  if n_ep >= 1  else 0.0
-            succ_100 = np.mean(success_log[-100:]) if n_ep >= 1  else 0.0
-            succ_all = np.mean(success_log)         if n_ep >= 1  else 0.0
-            success  = succ_100  # 兼容旧的 wandb key
+            succ_20      = np.mean(success_log[-20:])  if n_ep >= 1 else 0.0
+            succ_20_std  = np.std(success_log[-20:])   if n_ep >= 1 else 0.0
+            succ_100     = np.mean(success_log[-100:]) if n_ep >= 1 else 0.0
+            succ_100_std = np.std(success_log[-100:])  if n_ep >= 1 else 0.0
+            succ_all     = np.mean(success_log)        if n_ep >= 1 else 0.0
+            succ_all_std = np.std(success_log)         if n_ep >= 1 else 0.0
+            success      = succ_100  # 兼容旧的 wandb key
 
             if self.save_trajs:
                 run_results[-1]["obs_trajs"] = obs_trajs
@@ -894,35 +908,55 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                     log.info(
                         f"{'='*60}\n"
                         f"  EVAL {prog}\n"
-                        f"  success(iter)={success_rate:.3f} | "
-                        f"succ(20ep)={succ_20:.3f} | succ(100ep)={succ_100:.3f} | succ(all)={succ_all:.3f}\n"
-                        f"  avg reward={avg_episode_reward:.4f} | best reward={avg_best_reward:.4f} | "
+                        f"  success(iter)={success_rate*100:.1f}%±{std_success_rate*100:.1f}% | "
+                        f"succ(20ep)={succ_20*100:.1f}%±{succ_20_std*100:.1f}% | "
+                        f"succ(100ep)={succ_100*100:.1f}%±{succ_100_std*100:.1f}% | "
+                        f"succ(all)={succ_all*100:.1f}%±{succ_all_std*100:.1f}%\n"
+                        f"  reward={avg_episode_reward*100:.2f}±{std_episode_reward*100:.2f} | "
+                        f"best={avg_best_reward*100:.2f}±{std_best_reward*100:.2f} | "
+                        f"steps={avg_episode_steps:.1f}±{std_episode_steps:.1f} | "
                         f"episodes={num_episode_finished}\n"
                         f"{'='*60}"
                     )
                     if self.use_wandb:
                         wandb.log(
                             {
-                                "success rate - eval": success_rate,
-                                "avg episode reward - eval": avg_episode_reward,
-                                "avg best reward - eval": avg_best_reward,
+                                "success rate% - eval": success_rate * 100,
+                                "std success rate% - eval": std_success_rate * 100,
+                                "avg episode reward(x100) - eval": avg_episode_reward * 100,
+                                "std episode reward(x100) - eval": std_episode_reward * 100,
+                                "avg best reward(x100) - eval": avg_best_reward * 100,
+                                "std best reward(x100) - eval": std_best_reward * 100,
                                 "num episode - eval": num_episode_finished,
-                                "success rate 20ep": succ_20,
-                                "success rate 100ep": succ_100,
-                                "success rate all": succ_all,
+                                "avg episode steps - eval": avg_episode_steps,
+                                "std episode steps - eval": std_episode_steps,
+                                "success rate% 20ep": succ_20 * 100,
+                                "std success rate% 20ep": succ_20_std * 100,
+                                "success rate% 100ep": succ_100 * 100,
+                                "std success rate% 100ep": succ_100_std * 100,
+                                "success rate% all": succ_all * 100,
+                                "std success rate% all": succ_all_std * 100,
                             },
                             step=self.itr,
                             commit=False,
                         )
-                    run_results[-1]["eval_success_rate"] = success_rate
-                    run_results[-1]["eval_episode_reward"] = avg_episode_reward
-                    run_results[-1]["eval_best_reward"] = avg_best_reward
+                    run_results[-1]["eval_success_rate_pct"] = success_rate * 100
+                    run_results[-1]["eval_std_success_rate_pct"] = std_success_rate * 100
+                    run_results[-1]["eval_episode_reward_x100"] = avg_episode_reward * 100
+                    run_results[-1]["eval_std_episode_reward_x100"] = std_episode_reward * 100
+                    run_results[-1]["eval_best_reward_x100"] = avg_best_reward * 100
+                    run_results[-1]["eval_avg_episode_steps"] = avg_episode_steps
+                    run_results[-1]["eval_std_episode_steps"] = std_episode_steps
                 else:
                     log.info(
                         f"TRAIN {prog} step={cnt_train_step:7d} | "
-                        f"succ(20ep)={succ_20:.3f} | succ(100ep)={succ_100:.3f} | succ(all)={succ_all:.3f} | "
-                        f"reward={avg_episode_reward:.4f} | loss={loss:.4f} | "
-                        f"pg={pg_loss:.4f} | critic_v={v_loss:.4f} | critic_q={critic_loss:.4f} | bc={bc_loss:.4f} | "
+                        f"succ(20ep)={succ_20*100:.1f}%±{succ_20_std*100:.1f}% | "
+                        f"succ(100ep)={succ_100*100:.1f}%±{succ_100_std*100:.1f}% | "
+                        f"succ(all)={succ_all*100:.1f}%±{succ_all_std*100:.1f}% | "
+                        f"reward={avg_episode_reward*100:.2f}±{std_episode_reward*100:.2f} | "
+                        f"steps={avg_episode_steps:.1f}±{std_episode_steps:.1f} | "
+                        f"loss={loss:.4f} | pg={pg_loss:.4f} | "
+                        f"critic_v={v_loss:.4f} | critic_q={critic_loss:.4f} | bc={bc_loss:.4f} | "
                         f"eta={eta:.4f} | t={time:.1f}s"
                     )
                     if self.use_wandb:
@@ -943,21 +977,30 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                                 "ratio": ratio,
                                 "clipfrac": np.mean(clipfracs),
                                 "explained variance": explained_var,
-                                "avg episode reward - train": avg_episode_reward,
+                                "avg episode reward(x100) - train": avg_episode_reward * 100,
+                                "std episode reward(x100) - train": std_episode_reward * 100,
+                                "avg episode steps - train": avg_episode_steps,
+                                "std episode steps - train": std_episode_steps,
                                 "num episode - train": num_episode_finished,
                                 "diffusion - min sampling std": diffusion_min_sampling_std,
                                 "actor lr": self.actor_optimizer.param_groups[0]["lr"],
                                 "critic lr": self.critic_optimizer.param_groups[0]["lr"],
                                 "simi_loss": simi_loss,
-                                "success_rate_RATE": success,
-                                "success rate 20ep": succ_20,
-                                "success rate 100ep": succ_100,
-                                "success rate all": succ_all,
+                                "success rate% - train": success * 100,
+                                "success rate% 20ep": succ_20 * 100,
+                                "std success rate% 20ep": succ_20_std * 100,
+                                "success rate% 100ep": succ_100 * 100,
+                                "std success rate% 100ep": succ_100_std * 100,
+                                "success rate% all": succ_all * 100,
+                                "std success rate% all": succ_all_std * 100,
                             },
                             step=self.itr,
                             commit=True,
                         )
-                    run_results[-1]["train_episode_reward"] = avg_episode_reward
+                    run_results[-1]["train_episode_reward_x100"] = avg_episode_reward * 100
+                    run_results[-1]["train_std_episode_reward_x100"] = std_episode_reward * 100
+                    run_results[-1]["train_avg_episode_steps"] = avg_episode_steps
+                    run_results[-1]["train_std_episode_steps"] = std_episode_steps
                 with open(self.result_path, "wb") as f:
                     pickle.dump(run_results, f)
             self.itr += 1

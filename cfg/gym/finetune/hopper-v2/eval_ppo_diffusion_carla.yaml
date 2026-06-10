@@ -23,11 +23,11 @@ eval:
 
   # 指向目标 checkpoint 目录（按需覆盖）
   # 示例：.../logs/gym-finetune/${name}/2026-05-22_14-36-16_42/checkpoint
-  checkpoint_dir: ${hydra:runtime.cwd}/logs/gym-finetune/${name}/2026-06-07_18-40-37_42/checkpoint
+  checkpoint_dir: ${hydra:runtime.cwd}/logs/gym-finetune/${name}/2026-06-09_08-10-55_42/checkpoint
   checkpoint_pattern: state_*.pt
 
   # -1 表示自动取目录里最后一个 ckpt
-  checkpoint_step: -1
+  checkpoint_step: 220
 
   # 每个ckpt评估回合数
   episodes_per_checkpoint: 500

@@ -31,7 +31,7 @@ screen_width, screen_height = 640, 360
 WIDTH, HEIGHT, PACK = 80, 45, 4
 
 # ── Scenario key coordinates — only edit here to move the scenario ────────────
-_SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  28.0, 0.5
+_SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  27.0, 0.5
 _END1_X,  _END1_Y             = -78.0,  -0.7
 _END2_X,  _END2_Y             = -78.0,  -4.2
 # Derived: camera and off-route bounds auto-adjust with the coordinates above

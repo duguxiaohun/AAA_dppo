@@ -1,0 +1,16 @@
+defaults:
+  - eval_ppo_diffusion_carla
+  - _self_
+
+# 使用与训练步骤一致的动作生成方式（无 critic 引导）
+_target_: agent.new_eval_ppo_diffusion_agent.NewEvalPPODiffusionAgent
+
+eval:
+  # 明确关闭 critic 引导（本 Agent 内部已忽略，此处记录便于区分）
+  use_target_action_refine: False
+  # 结果输出目录
+  results_root: ${hydra:runtime.cwd}/logs/gym-eval/${env_name}_new_eval_no_critic
+
+wandb:
+  project: gym-${env_name}-new-eval
+  run: ${now:%H-%M-%S}_new_eval_no_critic_${name}

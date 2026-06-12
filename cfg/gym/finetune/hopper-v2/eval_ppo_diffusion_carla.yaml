@@ -6,8 +6,9 @@ defaults:
 _target_: agent.eval_ppo_diffusion_agent.EvalPPODiffusionAgent
 
 # 环境选择：取消注释切换场景，或命令行覆盖
-carla_env_interface: CarlaTown05Cross-v0
-# carla_env_interface: CarlaTown10Cross-v0
+# carla_env_interface: CarlaTown03Cross-v0
+# carla_env_interface: CarlaTown05Cross-v0
+carla_env_interface: CarlaTown10Cross-v0
 env_name: ${carla_env_interface}
 
 # true=显示CARLA窗口及内部画面（评估默认）；false=纯后台运行
@@ -23,11 +24,11 @@ eval:
 
   # 指向目标 checkpoint 目录（按需覆盖）
   # 示例：.../logs/gym-finetune/${name}/2026-05-22_14-36-16_42/checkpoint
-  checkpoint_dir: ${hydra:runtime.cwd}/logs/gym-finetune/${name}/2026-06-09_08-10-55_42/checkpoint
+  checkpoint_dir: ${hydra:runtime.cwd}/logs/gym-finetune/${name}/2026-05-19_09-54-39_42/checkpoint
   checkpoint_pattern: state_*.pt
 
   # -1 表示自动取目录里最后一个 ckpt
-  checkpoint_step: 220
+  checkpoint_step: 900
 
   # 每个ckpt评估回合数
   episodes_per_checkpoint: 500

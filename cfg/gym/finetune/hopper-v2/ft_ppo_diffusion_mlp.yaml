@@ -16,8 +16,8 @@ device: cuda:0
 visualize: true
 # 环境切换接口：默认 Town05 十字路口左转场景
 # 也可命令行覆盖：python script/run.py carla_env_interface=CarlaTown05Cross-v0
-carla_env_interface: CarlaTown03Cross-v0
-# carla_env_interface: CarlaTown05Cross-v0
+# carla_env_interface: CarlaTown03Cross-v0
+carla_env_interface: CarlaTown05Cross-v0
 # carla_env_interface: CarlaTown10Cross-v0
 
 
@@ -75,6 +75,49 @@ eval:
   # wandb 命名（eval.py 会覆盖全局 wandb 配置）
   wandb_project: gym-${env_name}-eval
   wandb_run_prefix: ${env_name}_eval500
+
+dataset_collect:
+  # 独立采集入口：
+  #   PYTHONPATH=$(pwd) python script/carla_dataset_collection/collect_dataset.py
+  #
+  # 切换 town 时只需要改上面的 carla_env_interface，或命令行覆盖：
+  #   PYTHONPATH=$(pwd) python script/carla_dataset_collection/collect_dataset.py carla_env_interface=CarlaTown05Cross-v0
+  output_root: ${hydra:runtime.cwd}/script/carla_dataset_collection/data
+  num_episodes: 200
+  max_steps: 260
+  deterministic: true
+  save_chains: true
+  save_sim: true
+
+  # 默认沿用当前 YAML 的 _target_。如果想复用旧采集 agent，可改成：
+  # agent_target: agent.train_ppo_diffusion_eval.TrainPPODiffusionAgent
+  agent_target: ""
+
+  # 默认按 carla_env_interface 自动找：
+  #   script/carla_dataset_collection/checkpoint_town03/state.pt
+  #   script/carla_dataset_collection/checkpoint_town05/state.pt
+  #   script/carla_dataset_collection/checkpoint_town10/state.pt
+  auto_checkpoint: true
+  checkpoint_root: ${hydra:runtime.cwd}/script/carla_dataset_collection
+  checkpoint_subdir_template: checkpoint_{town}
+
+  # 如需手动覆盖 checkpoint，可填 checkpoint_path 或 checkpoint_dir。
+  # checkpoint_path 可以直接指向 state.pt；checkpoint_dir 会优先找 state.pt，
+  # 否则找目录里最新的 state_*.pt。checkpoint_itr >=0 时沿用 agent.load(dir, itr)。
+  checkpoint_path: ""
+  checkpoint_dir: ""
+  checkpoint_itr: -1
+
+  # CARLA 启动控制；如果你已经手动启动了 CARLA，可把 start_carla 设为 false。
+  start_carla: true
+  kill_carla_before_start: true
+  carla_port: 2000
+  carla_quality: Epic
+  carla_warmup_seconds: 5
+  kill_wait_seconds: 5
+
+  # 采集默认不连 wandb，避免只采数据时产生训练 run。
+  disable_wandb: true
 
 train:
   n_train_itr: 2500

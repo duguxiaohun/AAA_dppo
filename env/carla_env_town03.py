@@ -566,9 +566,18 @@ class InterSection(gym.Env):
         self.spectator = self.world.get_spectator()
         ego_tf = self.ego_vehicle.get_transform()
         ego_loc = ego_tf.location
-        ego_yaw = ego_tf.rotation.yaw
-        cam_loc = carla.Location(x=ego_loc.x, y=ego_loc.y, z=ego_loc.z + 40.0)
-        cam_rot = carla.Rotation(pitch=-90.0, yaw=ego_yaw, roll=0.0)
+        yaw_rad = math.radians(ego_tf.rotation.yaw)
+
+        back = 20.0
+        height = 35.0
+
+        cam_loc = carla.Location(
+            x=ego_loc.x - math.cos(yaw_rad) * back,
+            y=ego_loc.y - math.sin(yaw_rad) * back,
+            z=ego_loc.z + height,
+        )
+        cam_pitch = -math.degrees(math.atan2(height, back))
+        cam_rot = carla.Rotation(pitch=cam_pitch, yaw=ego_tf.rotation.yaw, roll=0.0)
         self.spectator.set_transform(carla.Transform(cam_loc, cam_rot))
 
     def get_observation_scene(self):

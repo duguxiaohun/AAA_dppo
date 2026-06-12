@@ -29,9 +29,26 @@ from gym import spaces
 
 screen_width, screen_height = 640, 360
 WIDTH, HEIGHT, PACK = 80, 45, 4
+EGO_VEHICLE_COLOR = '255, 0, 0'
+SURROUNDING_VEHICLE_COLORS = [
+    '128, 0, 128',    # purple
+    '0, 0, 255',      # blue
+    '0, 180, 0',      # green
+    '0, 0, 0',        # black
+    '255, 255, 255',  # white
+    '0, 255, 255',    # cyan
+    '255, 255, 0',    # yellow
+    '255, 128, 0',    # orange
+    '255, 0, 255',    # magenta
+    '80, 80, 80',     # gray
+    '0, 128, 255',    # sky blue
+    '128, 255, 0',    # lime
+]
+OVERVIEW_CAMERA_HEIGHT = 80.0
+OVERVIEW_CAMERA_PITCH = -90.0
 
 # ── Scenario key coordinates — only edit here to move the scenario ────────────
-_SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  28.0, 0.5
+_SPAWN_X, _SPAWN_Y, _SPAWN_Z = -47.01,  27.0, 0.5
 _END1_X,  _END1_Y             = -78.0,  -0.7
 _END2_X,  _END2_Y             = -78.0,  -4.2
 # Derived: camera and off-route bounds auto-adjust with the coordinates above
@@ -186,10 +203,11 @@ class InterSection(gym.Env):
             _init_yaw = math.degrees(math.atan2(dy, dx))
         else:
             _init_yaw = 0.0
+        self.overview_camera_yaw = _init_yaw
 
         # ---- Ego vehicle ----
         bp_ego = self.world.get_blueprint_library().filter('vehicle.mercedes.coupe_2020')[0]
-        bp_ego.set_attribute('color', '0, 0, 0')
+        bp_ego.set_attribute('color', EGO_VEHICLE_COLOR)
         bp_ego.set_attribute('role_name', 'hero')
 
         # rangee 控制产生点沿直道方向的随机偏移：rangee=5 → y∈[20,25]，rangee=0 → 固定y=25
@@ -279,11 +297,10 @@ class InterSection(gym.Env):
         blueprints = sorted(blueprints, key=lambda bp: bp.id)
 
         batch = []
-        for transform in spawn_points:
+        for n, transform in enumerate(spawn_points):
             bp_sv = random.choice(blueprints)
             if bp_sv.has_attribute('color'):
-                color = random.choice(bp_sv.get_attribute('color').recommended_values)
-                bp_sv.set_attribute('color', color)
+                bp_sv.set_attribute('color', SURROUNDING_VEHICLE_COLORS[n % len(SURROUNDING_VEHICLE_COLORS)])
             if bp_sv.has_attribute('driver_id'):
                 driver_id = random.choice(bp_sv.get_attribute('driver_id').recommended_values)
                 bp_sv.set_attribute('driver_id', driver_id)
@@ -538,24 +555,18 @@ class InterSection(gym.Env):
         return self_trajs
 
     def spect_cam_follow(self):
-        """Chase camera matching Town10: behind and above the ego."""
-        if self.ego_vehicle is None:
-            return
+        """Fixed intersection overview; ego's initial heading points up."""
         self.spectator = self.world.get_spectator()
-        ego_tf = self.ego_vehicle.get_transform()
-        ego_loc = ego_tf.location
-        yaw_rad = math.radians(ego_tf.rotation.yaw)
-
-        back = 20.0
-        height = 35.0
-
-        cam_loc = carla.Location(
-            x=ego_loc.x - math.cos(yaw_rad) * back,
-            y=ego_loc.y - math.sin(yaw_rad) * back,
-            z=ego_loc.z + height,
+        center_x = (_BOUND_X_MIN + _BOUND_X_MAX) * 0.5
+        center_y = (_BOUND_Y_MIN + _BOUND_Y_MAX) * 0.5 - 8.0
+        road_wp = self.map.get_waypoint(carla.Location(x=center_x, y=center_y, z=0.0))
+        z = road_wp.transform.location.z if road_wp is not None else 0.0
+        cam_loc = carla.Location(x=center_x, y=center_y, z=z + OVERVIEW_CAMERA_HEIGHT)
+        cam_rot = carla.Rotation(
+            pitch=OVERVIEW_CAMERA_PITCH,
+            yaw=getattr(self, 'overview_camera_yaw', 0.0),
+            roll=0.0,
         )
-        cam_pitch = -math.degrees(math.atan2(height, back))
-        cam_rot = carla.Rotation(pitch=cam_pitch, yaw=ego_tf.rotation.yaw, roll=0.0)
         self.spectator.set_transform(carla.Transform(cam_loc, cam_rot))
 
     def get_observation_scene(self):
